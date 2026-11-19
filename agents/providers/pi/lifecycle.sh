@@ -2,9 +2,9 @@
 pi_preflight() {
   [[ "$operation" == install ]] || return 0
   local input config_node="$HOME/$PI_NODE_REL"
+  input="$(python3 "$AI_ROOT/config.py" pi --require-configured)" || return 1
   [[ -x "$config_node" ]] || config_node="$(command -v node || true)"
   [[ -x "$config_node" ]] || { echo 'error: Node required for Pi configuration preflight' >&2; return 1; }
-  input="$(python3 "$AI_ROOT/config.py" pi)" || return 1
   "$config_node" "$AI_ROOT/providers/pi/runtime/configure.js" schema --local <<<"$input"
 }
 

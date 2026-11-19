@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import sys
 import unittest
+import skilltree as ST
 
 AI = Path(__file__).resolve().parents[2]
 
@@ -61,7 +62,7 @@ await configure({op:'install',dir,root,secretRoot,profiles:{active:'example',pro
         with tempfile.TemporaryDirectory(prefix='model-refusal-') as temporary:
             root=Path(temporary);target=root/'models'
             helper=AI/'integrations/comfyui/model-downloads/download_models.sh'
-            env=dict(os.environ,MODEL_BASE_DIR=str(target),PATH='/usr/bin:/bin')
+            env=dict(os.environ,MODEL_BASE_DIR=str(target),PATH=ST.POSIX_TEST_PATH)
             url='https://huggingface.co/example/model/resolve/main/vae/model.safetensors'
             for args in ([str(helper),'--dry-run',url],
                          [str(helper.parent/'download_wan22_i2v.sh'),'--dry-run'],

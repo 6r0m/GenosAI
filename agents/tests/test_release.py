@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import sys
 import unittest
+import skilltree as ST
 
 AI=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('ai_release',AI/'tools/release.py')
@@ -50,7 +51,7 @@ class Distribution(unittest.TestCase):
         source=self.base/'source';source.mkdir()
         (source/'README.md').write_text('public')
         self.admit(source,'README.md')
-        for name in ('config.local.json','secrets/provider.key','agents/skills/synced/x.md','tmp/receipt.json','agents/data.log','.env.local'):
+        for name in ('config.local.json','config.local.jsonc','config.local.jsonc.bak','secrets/provider.key','agents/skills/synced/x.md','tmp/receipt.json','agents/data.log','.env.local'):
             file=source/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('private synthetic marker')
         result=release.export(source,self.base/'export')
         self.assertEqual(set(result),{'README.md','tools/source-manifest.json'})
@@ -149,7 +150,7 @@ class Distribution(unittest.TestCase):
                 if linked:target.symlink_to(outside)
                 else:target.write_bytes(outside.read_bytes())
                 (home/'.bashrc').write_text('# foreign shell settings\n')
-                result=subprocess.run(['bash',str(source/'agents/scripts/install.sh')],env=dict(os.environ,HOME=str(home),PATH='/usr/bin:/bin',TMPDIR=str(self.base)),capture_output=True,text=True)
+                result=subprocess.run(['bash',str(source/'agents/scripts/install.sh')],env=dict(os.environ,HOME=str(home),PATH=ST.POSIX_TEST_PATH,TMPDIR=str(self.base)),capture_output=True,text=True)
                 self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
                 self.assertIn('foreign search configuration',result.stderr)
                 self.assertEqual(target.read_bytes(),b'synthetic foreign configuration\n')
@@ -169,7 +170,7 @@ class Distribution(unittest.TestCase):
                  'powershell.exe':'printf "%s\\n" "C:/foreign/ripgreprc"'}
         for name,body in scripts.items():
             file=binary/name;file.write_text('#!/bin/bash\n'+body+'\n');file.chmod(0o700)
-        result=subprocess.run(['bash',str(source/'agents/scripts/install.sh'),'--platform','windows'],env=dict(os.environ,HOME=str(home),FIXTURE_HOME=str(home),PATH=str(binary)+':/usr/bin:/bin',TMPDIR=str(self.base)),capture_output=True,text=True)
+        result=subprocess.run(['bash',str(source/'agents/scripts/install.sh'),'--platform','windows'],env=dict(os.environ,HOME=str(home),FIXTURE_HOME=str(home),PATH=str(binary)+os.pathsep+ST.POSIX_TEST_PATH,TMPDIR=str(self.base)),capture_output=True,text=True)
         self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertIn('foreign RIPGREP_CONFIG_PATH',result.stderr)
         self.assertEqual(list(home.iterdir()),[])
@@ -182,14 +183,14 @@ class Distribution(unittest.TestCase):
         source=self.base/'checkout';release.export(original,source)
         home=self.base/'home with spaces';home.mkdir()
         (home/'.bashrc').write_text('# foreign setting\n')
-        environment=dict(os.environ,HOME=str(home),PATH='/usr/bin:/bin',TMPDIR=str(self.base),PYTHONDONTWRITEBYTECODE='1')
+        environment=dict(os.environ,HOME=str(home),PATH=ST.POSIX_TEST_PATH,TMPDIR=str(self.base),PYTHONDONTWRITEBYTECODE='1',PLATFORM='linux/amd64',PROVIDER='pi',RUNTIME='1',APPROVE='000000000000')
         for command in (['make','init'],['make','init'],['make','check'],['make','install'],['make','install']):
             result=subprocess.run(command,cwd=source,env=environment,capture_output=True,text=True,timeout=35)
             self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertTrue((home/'.agents/AGENTS.md').is_symlink())
         self.assertFalse((home/'.pi').exists());self.assertFalse((home/'.codex').exists())
         before=(home/'.bashrc').read_text()
-        result=subprocess.run(['bash','agents/scripts/install.sh','--provider','pi'],cwd=source,env=environment,capture_output=True,text=True)
+        result=subprocess.run(['make','install','PROVIDER=pi'],cwd=source,env=environment,capture_output=True,text=True)
         self.assertNotEqual(result.returncode,0);self.assertIn('unconfigured',result.stderr)
         self.assertEqual((home/'.bashrc').read_text(),before)
         self.assertFalse((home/'.pi').exists())
@@ -197,6 +198,7 @@ class Distribution(unittest.TestCase):
         self.assertEqual(result.returncode,0,result.stdout+result.stderr)
         self.assertEqual((home/'.bashrc').read_text(),'# foreign setting\n')
         self.assertFalse((home/'.agents/AGENTS.md').exists())
+        (source/'config.local.jsonc').unlink()
         (source/'config.local.json').write_text(json.dumps({'pi':{'active':''}}))
         result=subprocess.run(['make','check'],cwd=source,env=environment,capture_output=True,text=True)
         self.assertNotEqual(result.returncode,0,'an explicitly invalid selection must reach its schema owner')

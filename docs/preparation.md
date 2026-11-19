@@ -39,7 +39,11 @@ The root `.gitattributes` keeps source LF and pinned vendor bytes stable indepen
 repository, including checkout with automatic Windows line-ending conversion.
 
 Git ignore behavior alone is insufficient: a force-added key is still tracked. The public check inspects
-staged filenames before accessing staged content. Run `make public-check` before each authorized push. Synthetic controls must distinguish detection from an
+staged filenames before accessing staged content. `make init` or `make hooks` registers the local [Git gates](../.githooks/README.md).
+Pre-commit checks the complete staged snapshot using its own staged manifest; working edits
+do not substitute for staged bytes. Pre-push also scans working source and all Git refs.
+Missing tools refuse. Existing foreign hooks remain intact and require explicit integration.
+Run `make public-check` before each authorized push. Synthetic controls must distinguish detection from an
 unavailable/broken scanner. Human review owns names, email attribution, URLs, source topology and proposed
 Git identities that pattern matching cannot judge.
 

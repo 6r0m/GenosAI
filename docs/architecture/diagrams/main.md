@@ -15,6 +15,8 @@ flowchart LR
   Tools -->|initialize absent example| Local[Ignored local settings]
   Tools -->|validation and tests| Agents
   Tools -->|validation and tests| Integrations
+  Git[Local Git hooks] -->|staged source and history gates| Tools
+  Tools -->|register local hooks| Git
   Tools -->|admitted source export| Distribution[Source-only artifact]
   Agents -->|read sparse overrides| Local
   Agents -->|native integration contracts| Clients[Native agent applications]

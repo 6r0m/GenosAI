@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(git rev-parse --show-toplevel)"
+exec bash "$root/agents/permissions/run-guard.sh" --strict ../../../tools/release.py check

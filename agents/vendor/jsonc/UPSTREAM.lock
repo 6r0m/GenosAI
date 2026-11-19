@@ -1,0 +1,7 @@
+package = json-with-comments
+version = 1.3.0
+source = https://github.com/n-takumasa/json-with-comments
+commit = 6183787287d41367e7941250d7d87b84d6258a44
+wheel-sha256 = cc96215e8960687180a6e60db8567c806ba40fb56187b2b8cf60ccc0bdfeb81e
+included = jsonc/_util.py (comment preprocessing only; standard-library JSON owns decoding)
+patches = preserve comment whitespace to reject joined tokens

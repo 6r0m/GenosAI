@@ -214,8 +214,9 @@ def preflight(path):
     if problems:
         raise Refusal("local settings fail the required guard posture")
     # The plan also binds the local file, source location, and projection code.
-    sources = [raw.hex(), None if local_raw is None else local_raw.hex(), AGENTS]
-    for source in (__file__, local_config.__file__, os.path.join(HERE,'local-settings.types.json')):
+    sources = [raw.hex(), None if local_raw is None else local_raw.hex(), AGENTS, str(local_config.local_path())]
+    parser_sources = local_config.parser_sources() if local_raw is not None and local_config.local_path().suffix == '.jsonc' else []
+    for source in (__file__, local_config.__file__, os.path.join(HERE,'local-settings.types.json'), *parser_sources):
         content = read(source, "settings source")
         if content is None:
             raise Refusal("settings projection source is missing")

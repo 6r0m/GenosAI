@@ -1,11 +1,12 @@
 # Local browser setup
 
 The browser skill consumes optional connection metadata from the AI checkout's
-`config.local.json`. This file is ignored by Git and must contain references only,
+`config.local.jsonc`. This file is ignored by Git and must contain references only,
 never cookies, tokens, passwords, or exported browser state. Authentication material
 stays with its existing secret-store owner.
 
-Copy `config.local.example.json` to `config.local.json` at the AI checkout root.
+Run `make init` at the GenosAI checkout root to create `config.local.jsonc`.
+Existing `config.local.json` remains supported; keep one file only.
 The example leaves the browser disabled. No shared repository catalogue or user-name
 variables are needed: installation owns skill links, and the browser owner supplies
 only the connection details required here.
@@ -17,7 +18,7 @@ Do not use lexical `../../` through a Windows skill junction. With Python on the
 same platform as the installed skill path:
 
 ```bash
-python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).parents[3] / "config.local.json")' "<installed-drive-browser>/SKILL.md"
+python3 -c 'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve(strict=True).parents[3])' "<installed-drive-browser>/SKILL.md"
 ```
 
 On native Windows, use `python` and a native path. Native junction behavior requires
@@ -26,10 +27,12 @@ runbook may instead supply the connection and authentication procedures directly
 
 ## Local connection fields
 
-Read the file as a JSON object. Missing configuration, a missing `browser` object,
+From that checkout, load through `agents/config.py` (its `load()` function returns
+the parsed object alongside the raw bytes; never print either). This owner supports
+JSONC comments and legacy strict JSON and refuses ambiguous dual files. Missing configuration, a missing `browser` object,
 or a null/missing `browser.cdp_url` means browser automation is unconfigured. Report
 the missing setup; do not guess a port, scan endpoints, launch, or attach. Invalid
-JSON or invalid field types must be corrected before use, without guessing defaults.
+JSON/JSONC or invalid field types must be corrected before use, without guessing defaults.
 
 The optional `browser` object holds:
 

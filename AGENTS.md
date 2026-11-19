@@ -6,7 +6,8 @@ utilities. Universal behavior lives in [agents/AGENTS.md](agents/AGENTS.md); thi
 
 ## Entrypoints
 
-- `make init`: create a missing ignored local example; preserve existing input.
+- `make init`: create a missing ignored JSONC example and register local release hooks; preserve existing input.
+- `make hooks`: register leak-check hooks without initializing local settings; preserve foreign hooks.
 - `make check`: validate source/local metadata without installation, network calls or native writes.
 - `make install PROVIDER=shared PLATFORM=host`: default instruction/search wiring only.
 - `make install PROVIDER=claude|codex|pi PLATFORM=host|windows|both`: explicitly selected integration.

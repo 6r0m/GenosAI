@@ -21,12 +21,15 @@ make test
 
 Default install wires shared instructions/search on the host only. Choose providers and Windows clients
 explicitly with the options shown by `make help`; Pi additionally needs a private connection profile.
-`config.local.json` holds ignored personal deltas; [the sparse example](config.local.example.json) enables
-no connection. Keep credentials in ignored local storage or their native application stores.
+`config.local.jsonc` holds ignored personal deltas; [the commented example](config.local.example.jsonc) enables
+no connection. Comments explain every shared section and opt-in recipes in one file.
+Existing `config.local.json` is preserved; keep just one local file. Keep credentials in ignored local storage or their native application stores.
 [Project instructions](AGENTS.md) define development commands and acceptance.
 
 Tests additionally require Node on `PATH`; runtime acceptance uses the pinned Pi SDK with Node 22.19+
-and synthetic transports. Gitleaks 8.30.1 is required by `make public-check`. Native Codex/Windows
+and synthetic transports. Gitleaks 8.30.1 is required by `make public-check`.
+`make init` also registers local commit/push [leak-check hooks](.githooks/README.md);
+`make hooks` registers them separately, preserving foreign hook configuration. Native Codex/Windows
 checks report explicit skips when their optional clients are unavailable; those skips do not prove
 platform support.
 

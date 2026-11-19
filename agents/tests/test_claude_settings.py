@@ -20,6 +20,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skilltree as ST
@@ -86,6 +87,16 @@ class Base(unittest.TestCase):
                         'pluginConfigs':{'langfuse-observability@langfuse-observability':{'options':{}}}})
         write_json(os.path.join(self.provider,'user-settings.json'),fixture)
         self.script = os.path.join(self.provider, "settings.py")
+        if POSIX:
+            binary = os.path.join(self.tmp, "bin")
+            os.makedirs(binary)
+            translator = os.path.join(binary, "wslpath")
+            with open(translator, "w") as stream:
+                stream.write("#!/bin/sh\nprintf 'C:/Fixture%s\\n' \"$2\"\n")
+            os.chmod(translator, 0o700)
+            self.env_patch = unittest.mock.patch.dict(os.environ, PATH=binary + os.pathsep + os.environ.get("PATH", ""))
+            self.env_patch.start()
+            self.addCleanup(self.env_patch.stop)
 
     def tracked(self, side="wsl"):
         with open(os.path.join(self.provider, "user-settings.json")) as stream: value=json.load(stream)
@@ -646,6 +657,22 @@ class LocalSettings(Base):
         self.assertEqual(result.returncode, 3, result.stdout + result.stderr)
         self.assertEqual(read_bytes(live), before)
         self.assertEqual(self.backups(live), [])
+
+    def test_jsonc_comments_and_parser_changes_bind_the_approved_plan(self):
+        vendor=os.path.join(self.agents,'vendor')
+        shutil.copytree(os.path.join(ST.AGENTS,'vendor'),vendor,ignore=shutil.ignore_patterns('__pycache__'))
+        local=os.path.join(os.path.dirname(self.agents),'config.local.jsonc')
+        with open(local,'w') as stream:stream.write('{/* preferences */"claude":{"model":"sonnet"}}')
+        live=self.side('wsl',self.drifted())
+        approved=self.plan_id(('wsl',live));before=read_bytes(live)
+        parser=os.path.join(vendor,'jsonc','_util.py')
+        with open(parser,'a') as stream:stream.write('\n# Synthetic parser revision\n')
+        result=self.settings('apply','--side','wsl',live,'--approve',approved)
+        self.assertEqual(result.returncode,3,result.stdout+result.stderr)
+        self.assertEqual(read_bytes(live),before);self.assertEqual(self.backups(live),[])
+        result=self.settings('apply','--side','wsl',live,'--approve',self.plan_id(('wsl',live)))
+        self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertEqual(json.loads(read_bytes(live))['model'],'sonnet')
 
     def test_invalid_or_guard_weakening_local_input_writes_nothing(self):
         live = self.side("wsl", self.drifted())

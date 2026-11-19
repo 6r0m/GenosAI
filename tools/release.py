@@ -20,7 +20,7 @@ def private(relative):
     parts=relative.parts
     return (any(p in PRIVATE_DIRS for p in parts) or
             (parts[0]=='secrets' and len(parts)>1 and relative.as_posix()!='secrets/README.md') or
-            relative.name=='config.local.json' or relative.name.startswith('config.local.json.') or
+            relative.name in {'config.local.json','config.local.jsonc'} or any(relative.name.startswith(n+'.') for n in ('config.local.json','config.local.jsonc')) or
             relative.name in {'machine.json','repos.json','.env'} or
             (relative.name.startswith('.env.') and relative.name!='.env.example') or
             relative.suffix in PRIVATE_SUFFIXES)
@@ -111,61 +111,80 @@ def export(root,destination):
         manifest[relative.as_posix()]=hashlib.sha256(target.read_bytes()).hexdigest()
     return manifest
 
-def check(root,artifact=False):
-    files=list(source_files(root,artifact))
-    admitted={file.relative_to(root).as_posix() for file in files}
+def own_repository(root):
+    try:
+        (root/'.git').lstat()
+    except FileNotFoundError:
+        return False
+    result=subprocess.run(['git','-C',str(root),'rev-parse','--show-toplevel'],capture_output=True,text=True)
+    if result.returncode or Path(result.stdout.strip()).resolve()!=root.resolve():
+        raise ValueError('cannot verify independent Git repository; metadata or Git configuration is invalid')
+    return True
+
+
+def check_index(root,scratch,required=False):
+    entries=subprocess.check_output(['git','-C',str(root),'ls-files','--stage','-z']).decode().split('\0')
+    indexed=[]
+    for entry in filter(None,entries):
+        metadata,name=entry.split('\t',1)
+        mode,oid,stage=metadata.split()
+        if mode not in ('100644','100755') or stage!='0': raise ValueError('unsupported indexed source entry: '+name)
+        if private(Path(name)): raise ValueError('private file tracked: '+name)
+        indexed.append(name)
+    staged=scratch/'index';staged.mkdir()
+    if indexed:
+        if SOURCE_MANIFEST.as_posix() not in indexed: raise ValueError('unclassified indexed source file: missing staged manifest')
+        manifest=staged/SOURCE_MANIFEST;manifest.parent.mkdir(parents=True)
+        manifest.write_bytes(subprocess.check_output(['git','-C',str(root),'show',':'+SOURCE_MANIFEST.as_posix()]))
+        admitted=admitted_files(staged)
+        for name in indexed:
+            if name not in admitted: raise ValueError('unclassified indexed source file: '+name)
+        for name in indexed:
+            target=staged/name;target.parent.mkdir(parents=True,exist_ok=True)
+            target.write_bytes(subprocess.check_output(['git','-C',str(root),'show',':'+name]))
+        staged_files=list(source_files(staged,artifact=True))
+        if personal_candidates(staged,staged_files): raise ValueError('personal path in staged source')
+    elif required:
+        raise ValueError('staged source has no reviewed manifest')
+    scanner(staged,scratch/'staged-scan')
+
+
+def check(root,artifact=False,staged_only=False):
+    if artifact and staged_only: raise ValueError('artifact and staged checks are separate inputs')
+    own_git=own_repository(root)
+    if staged_only and not own_git: raise ValueError('staged checks require the source repository itself')
+    files=[] if staged_only else list(source_files(root,artifact))
     findings=personal_candidates(root,files)
     if findings: raise ValueError('\n'.join(findings))
-    scratch_root=ROOT/'tmp'; scratch_root.mkdir(exist_ok=True)
+    scratch_root=ROOT/'tmp';scratch_root.mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='public-check-',dir=scratch_root) as temporary:
         scratch=Path(temporary)
-        if artifact: scanner(root,scratch)
-        else:
+        if not staged_only:
             source=scratch/'source';source.mkdir()
             for file in files:
                 target=source/file.relative_to(root);target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(file,target)
-            scanner(source,scratch)
-        # Only an independent repository's own staged snapshot/history are distribution inputs.
-        result=subprocess.run(['git','-C',str(root),'rev-parse','--show-toplevel'],capture_output=True,text=True)
-        if result.returncode==0 and Path(result.stdout.strip()).resolve()==root.resolve():
-            entries=subprocess.check_output(['git','-C',str(root),'ls-files','--stage','-z']).decode().split('\0')
-            indexed=[]
-            for entry in filter(None,entries):
-                metadata,name=entry.split('\t',1)
-                mode,oid,stage=metadata.split()
-                if mode not in ('100644','100755') or stage!='0': raise ValueError('unsupported indexed source entry: '+name)
-                indexed.append(name)
-            for name in filter(None,indexed):
-                if private(Path(name)): raise ValueError('private file tracked: '+name)
-                if name not in admitted: raise ValueError('unclassified indexed source file: '+name)
-            staged=scratch/'index';staged.mkdir()
-            staged_files=[]
-            for name in filter(None,indexed):
-                target=staged/name;target.parent.mkdir(parents=True,exist_ok=True)
-                target.write_bytes(subprocess.check_output(['git','-C',str(root),'show',':'+name]))
-                staged_files.append(target)
-            if indexed: staged_files=list(source_files(staged,artifact=True))
-            if personal_candidates(staged,staged_files): raise ValueError('personal path in staged source')
-            scanner(staged,scratch/'staged-scan')
-            has_history=subprocess.run(['git','-C',str(root),'rev-parse','--verify','HEAD'],capture_output=True)
-            if has_history.returncode!=0:
-                print('Source and index privacy checks passed; no distributed commits exist.')
-                return
-            history=subprocess.run(['gitleaks','git',str(root),'--config',str(ROOT/'.gitleaks.toml'),'--log-opts=--all','--ignore-gitleaks-allow','--gitleaks-ignore-path',os.devnull,'--redact=100','--no-banner','--exit-code','23'],capture_output=True)
-            if history.returncode: raise ValueError('distributed Git history failed secret scanning')
-    print('Source privacy checks passed; manual identity, attribution and topology review is still required.')
+            scanner(source,scratch/'working-scan')
+        if own_git:
+            check_index(root,scratch,required=staged_only)
+            if not staged_only:
+                refs=subprocess.check_output(['git','-C',str(root),'for-each-ref','--format=%(refname)']).strip()
+                head=subprocess.run(['git','-C',str(root),'rev-parse','--verify','HEAD'],capture_output=True)
+                if refs or head.returncode==0:
+                    history=subprocess.run(['gitleaks','git',str(root),'--config',str(ROOT/'.gitleaks.toml'),'--log-opts=--all','--ignore-gitleaks-allow','--gitleaks-ignore-path',os.devnull,'--redact=100','--no-banner','--exit-code','23'],capture_output=True)
+                    if history.returncode: raise ValueError('distributed Git history failed secret scanning')
+    print(('Staged source' if staged_only else 'Source')+' privacy checks passed; manual identity, attribution and topology review is still required.')
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     sub=parser.add_subparsers(dest='operation',required=True)
     p=sub.add_parser('export');p.add_argument('destination',type=Path);p.add_argument('--manifest',type=Path)
-    p=sub.add_parser('check');p.add_argument('source',type=Path,nargs='?',default=ROOT);p.add_argument('--artifact',action='store_true')
+    p=sub.add_parser('check');p.add_argument('source',type=Path,nargs='?',default=ROOT);p.add_argument('--artifact',action='store_true');p.add_argument('--staged',action='store_true')
     args=parser.parse_args()
     try:
         if args.operation=='export':
             manifest=export(ROOT,args.destination)
             if args.manifest: args.manifest.write_text(json.dumps(manifest,indent=2)+'\n')
             print('Exported',len(manifest),'source files; private state excluded.')
-        else: check(args.source.resolve(),args.artifact)
+        else: check(args.source.resolve(),args.artifact,args.staged)
     except (ValueError,OSError,subprocess.SubprocessError) as exc:
         print('REFUSED:',str(exc),file=sys.stderr);sys.exit(1)

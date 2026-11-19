@@ -1,6 +1,6 @@
 # Pi runtime
 
-[profiles.json](profiles.json) supplies disabled public defaults. The ignored root `config.local.json`
+[profiles.json](profiles.json) supplies disabled public defaults. The ignored root `config.local.jsonc`
 `pi` object owns private connection choices; [configuration](../../../configuration.md) owns composition. [configure.js](configure.js)
 owns its schema, pinned-catalog validation and the owned native authentication/model projection;
 [launch.sh](launch.sh) resolves the active profile through `configure.js` and dispatches the pinned native CLI.
@@ -19,13 +19,51 @@ install/remove and managed launch disable Pi telemetry explicitly.
 
 ## Change a Pi connection
 
-Use the SOT's default or select a profile for one launch:
+First copy [the connection example](profiles.example.json) into the private root `pi` object,
+choose your own provider/model, and supply the referenced key. Public defaults intentionally
+configure no connection. Install the selected integration before using its default or an explicit profile:
 
 ```bash
 pi-sot
-pi-sot --profile kimi
-pi-sot --profile deepseek --version
+pi-sot --profile example
+pi-sot --profile example --version
 ```
+
+The strict JSON example is copy-ready profile data, not a second settings file. Its fields are:
+
+| Field | Meaning |
+|---|---|
+| `active` | Exact local profile ID selected by default |
+| `profiles.example.provider` | Provider ID from the pinned native catalog |
+| `profiles.example.model` | Model ID from that same provider/catalog |
+| `profiles.example.credential` | File reference under `pi.secret_root`, never the key value |
+
+Optional profile fields are `thinking`, `endpoint`, `api` and `compatibleModel`. For example,
+a separately authorized compatible server can use this **synthetic** profile definition:
+
+```json
+{
+  "provider": "example-service",
+  "model": "example-model",
+  "credential": "secrets/compatible.key",
+  "endpoint": "http://127.0.0.1:8000/v1",
+  "api": "openai-completions",
+  "compatibleModel": {
+    "name": "Example model",
+    "reasoning": false,
+    "input": ["text"],
+    "contextWindow": 8192,
+    "maxTokens": 1024
+  }
+}
+```
+
+Place that under another `profiles` ID and select it through `active` or `--profile`.
+This example neither starts a server nor proves that any server implements the protocol.
+For catalog-backed profiles, omit `compatibleModel`; omit `thinking` to inherit the
+native default, or choose a level verified by the pinned model's capability check.
+An endpoint override does not authorize contacting it. Credential files for inactive profiles
+are not required. Do not paste credentials into endpoints or add authorization headers.
 
 `--profile <id>` (also `--profile=<id>`) must precede native Pi arguments. IDs are exact keys from the composed private profiles; there is no alias table. The selector is consumed by the managed
 launcher and never rewrites that file or its `active` default. Remaining native arguments, including

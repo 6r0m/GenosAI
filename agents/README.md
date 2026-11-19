@@ -25,7 +25,8 @@ agents/
 ├── AGENTS.md      # Universal agent instructions (global SOT for all repos)
 ├── agent-ignore   # paths agent search sweeps must not surface (ripgrep, machine-wide)
 ├── package.json   # Pi local-package loading contract
-├── config.py      # ignored local input and validated sparse additions
+├── config.py      # ignored JSON/JSONC input and validated sparse additions
+├── vendor/        # pinned comment parser
 ├── skills/        # Global agent skills (Claude Code + Codex + Pi), one dir per skill
 │   ├── .shared/   # Principles referenced by the skills (dot-dir: not a skill)
 │   └── synced/    # Claude Code's claude.ai skill cache via .claude/skills (ignored; never in a Codex route)
@@ -47,6 +48,9 @@ Conformance, ownership, routing, template and cost checks: [tests/README.md](tes
 `bash agents/tests/run-tests.sh`, no venv required.
 
 ## Local configuration
+
+The [commented template](../config.local.example.jsonc) explains every shared section and
+optional usage. [Parser dependency](vendor/README.md) owns the pinned JSONC implementation.
 
 [Private settings contract](configuration.md) owns private deltas, validation, and their relationship to
 component defaults. The local file stays outside the tracked source.

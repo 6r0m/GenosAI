@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Launch one guard from guards/ under a Python that actually runs.
 #
-#   bash run-guard.sh <guard-file.py>     # hook JSON on stdin, decision on stdout
+#   bash run-guard.sh [--strict] <guard-file.py>     # hook JSON on stdin, decision on stdout
 #
 # Why interpreters are executed, not looked up
 # --------------------------------------------
@@ -24,8 +24,8 @@
 # It also bounds the blast radius of a missing guard. Invoking `python3 <path>`
 # directly exits 2 when the file is absent, and exit 2 is PreToolUse's blocking
 # convention - renaming a guard bricked every Bash and Write call in the session
-# until the old path was restored. Here stdout is always valid JSON and the exit
-# status is always 0, so an absent or unrunnable guard degrades to "no decision"
+# until the old path was restored. In the default Claude mode an absent or
+# unrunnable guard produces valid JSON with exit 0, degrading to "no decision"
 # rather than wedging the session.
 #
 # Be clear about what that costs: for recursive deletes there is no meaningful
@@ -34,13 +34,18 @@
 # cover `bash -c`, and no rule covers `/bin/rm -rf /etc`. If no Python runs on
 # a machine, that whole class of command is unguarded there. selfcheck.sh is
 # what surfaces it.
+# --strict is for release gates: missing scripts/interpreters refuse instead of
+# emitting the Claude-specific no-decision fallback. Guard defaults stay unchanged.
 set -u
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STRICT=0
+if [[ "${1-}" == --strict ]]; then STRICT=1; shift; fi
 GUARD="${1-}"
 
 if [ -z "$GUARD" ] || [ ! -f "$HERE/guards/$GUARD" ]; then
     echo "run-guard: no such guard: ${GUARD:-<none>}" >&2
+    [[ "$STRICT" != 1 ]] || exit 1
     printf '{}\n'
     exit 0
 fi
@@ -75,5 +80,6 @@ for candidate in "python3" "python" "py -3" "python3.exe" "python.exe"; do
 done
 
 echo "run-guard: $launch_error; $GUARD did not run" >&2
+[[ "$STRICT" != 1 ]] || exit 1
 printf '{}\n'
 exit 0

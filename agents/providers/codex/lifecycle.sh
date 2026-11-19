@@ -1,5 +1,5 @@
 codex() {
-  local id="$1" platform="$2" home="$3" task_codex native_home
+  local id="$1" platform="$2" home="$3" task_codex native_home native_cwd=/
   generic "$id" "$platform" "$home"
   if [[ "$operation" == uninstall ]]; then
     printf 'kept    %s (Codex settings are left in place on uninstall)\n' "$home/${PROVIDER_DIR[$id]}/config.toml"
@@ -9,7 +9,8 @@ codex() {
     task_codex="$(type -P codex || true)"
     native_home="$home/${PROVIDER_DIR[$id]}"
   else
-    task_codex="$(cd /mnt/c && cmd.exe /d /c where codex 2>/dev/null | tr -d '\r' |
+    [[ ! -d /mnt/c ]] || native_cwd=/mnt/c
+    task_codex="$(cd "$native_cwd" && cmd.exe /d /c where codex 2>/dev/null | tr -d '\r' |
       awk 'tolower($0) ~ /\.(exe|cmd|bat)$/ && !found { print; found=1 }')" || true
     [[ -z "$task_codex" ]] || task_codex="$(wslpath -u "$task_codex")"
     native_home="$(wslpath -w "$home/${PROVIDER_DIR[$id]}")"

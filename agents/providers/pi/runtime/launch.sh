@@ -45,7 +45,7 @@ case "${1-}" in
     if [[ -n "$selected_profile" ]]; then "$task_node" "$SCRIPT_DIR/configure.js" resolve "${config_args[@]}" "${selection_args[@]}" --local <<<"$local_json" >/dev/null; fi
     exec "$task_node" "$task_cli" "$@" ;;
   install|remove|uninstall|update|config|mcp|auth)
-    echo "error: '$1' mutates native state outside the managed SOT route; edit the ignored config.local.json pi object for connections, or use scripts/install.sh and scripts/uninstall.sh for lifecycle operations. Raw pi is the unmanaged route." >&2
+    echo "error: '$1' mutates native state outside the managed SOT route; edit the ignored local pi object for connections, or use scripts/install.sh and scripts/uninstall.sh for lifecycle operations. Raw pi is the unmanaged route." >&2
     exit 1 ;;
 esac
 # One install validates and projects one profile snapshot, then returns its launch selection.

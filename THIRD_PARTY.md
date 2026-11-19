@@ -1,10 +1,12 @@
 # Third-party material
 
-GenosAI's original code, documentation and skills use the [MIT License](LICENSE).
+GenosAI's original code, documentation and skills use the [MIT License](LICENSE),
+with initial attribution to the maintainer's public handle, `6r0m`.
 The material below retains its own licenses and notices, which must accompany redistribution.
 
 | Material | Provenance owner | Bundled terms |
 |---|---|---|
+| JSONC parser | [json-with-comments 1.3.0, local patches](agents/vendor/jsonc/UPSTREAM.lock) | [MIT](agents/vendor/jsonc/LICENSE) |
 | Frontend design skill | [pinned upstream commit](agents/skills/frontend-design/UPSTREAM.lock) | [Apache-2.0](agents/skills/frontend-design/LICENSE.txt) |
 | Web interface guidelines reference | [pinned upstream commit](agents/skills/web-design-review/UPSTREAM.lock) | [MIT](agents/skills/web-design-review/references/vendor/web-interface-guidelines/LICENSE) |
 | Playwright CLI reference manual | [@playwright/cli 0.1.17](agents/skills/drive-browser/UPSTREAM.lock) | [Apache-2.0](agents/skills/drive-browser/references/playwright-cli/LICENSE) |

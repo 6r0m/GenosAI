@@ -5,6 +5,8 @@ tests below disagree about findings, never about definitions.
 """
 import os
 import re
+import shutil
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 AGENTS = os.path.abspath(os.path.join(HERE, os.pardir))
@@ -12,6 +14,13 @@ SKILLS = os.path.join(AGENTS, "skills")
 SHARED = os.path.join(SKILLS, ".shared")
 TEMPLATES = os.path.join(SHARED, "templates")
 REPO = os.path.abspath(os.path.join(AGENTS, os.pardir))
+# Fixture isolation must retain the declared runtimes even in /usr/local or a venv.
+# Windows interop availability is checked separately by the installer tests.
+POSIX_TEST_PATH = os.pathsep.join(dict.fromkeys((
+    os.path.dirname(sys.executable),
+    os.path.dirname(shutil.which("node") or sys.executable),
+    "/usr/bin", "/bin",
+)))
 
 # Vendored/generated trees are not ours to audit, so they are never router nodes.
 NOT_OURS = re.compile(

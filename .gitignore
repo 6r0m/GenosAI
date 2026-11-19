@@ -1,6 +1,8 @@
 # Workstation references and preferences; the example remains public.
 /config.local.json
 /config.local.json.*
+/config.local.jsonc
+/config.local.jsonc.*
 
 # Private authentication references and runtime state never enter a source export.
 /secrets/*

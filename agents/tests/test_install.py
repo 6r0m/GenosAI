@@ -22,7 +22,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import skilltree as ST
 
-SAFE_PATH = "/usr/bin:/bin"
+SAFE_PATH = ST.POSIX_TEST_PATH
 WINDOWS_REACHABLE = any(shutil.which(exe, path=SAFE_PATH) for exe in ("cmd.exe", "powershell.exe"))
 
 

@@ -1,8 +1,8 @@
 # Local agent configuration
 
-[config.py](config.py) owns loading the AI checkout's ignored `config.local.json` and validating
+[config.py](config.py) owns loading the AI checkout's ignored `config.local.jsonc` and validating
 its shared structure. Component defaults stay with their current owners. Start from the
-[sparse example](../config.local.example.json); do not copy an entire provider configuration.
+[commented example](../config.local.example.jsonc); do not copy an entire provider configuration.
 Local input contains preferences and references only. Credential files stay in ignored AI-local storage or an explicitly configured external directory; native sign-ins stay native.
 
 ## Composition
@@ -77,6 +77,9 @@ reads the key only when Pi needs authentication. `pi.ownership_root` is a migrat
 existing native projection, not another source tree or credential store. Preserve its existing value
 until a separately verified cutover transfers ownership. Neither check nor init moves secrets.
 
-Only `config.local.json` contains private overrides. The sparse tracked example stays disabled; no
+Use one private `config.local.jsonc` file; existing strict `config.local.json` files remain supported.
+Both present, invalid comments, trailing commas and duplicate keys refuse. `make init` preserves existing
+input byte for byte and seeds JSONC only when neither exists. The bundled, pinned comment parser needs
+no package installation; native projections retain their native format. The commented example stays disabled; no
 real connection or permissive operator preference belongs in tracked defaults. `make check` validates
 configured profile structure; selected Pi install also checks credentials and the installed native catalog.

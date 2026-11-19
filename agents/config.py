@@ -1,5 +1,6 @@
 """Read the AI checkout's private deltas without printing their values."""
 import copy
+import importlib.util
 import json
 import ntpath
 import re
@@ -33,20 +34,67 @@ def _fields(value, allowed, label):
         raise ConfigError("invalid or unsupported %s fields" % label)
 
 
-def load():
+def local_path():
+    """Choose one input owner; never silently prefer one private file over another."""
+    jsonc = LOCAL.with_suffix(".jsonc")
+    present = []
+    for path in (LOCAL, jsonc):
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        except OSError:
+            raise ConfigError("cannot inspect local configuration") from None
+        present.append(path)
+    if len(present) > 1:
+        raise ConfigError("both local JSON and JSONC exist; keep one configuration file")
+    return present[0] if present else jsonc
+
+
+def parser_sources():
+    return sorted((Path(__file__).resolve().parent / "vendor/jsonc").glob("*.py"))
+
+
+def parse(raw, commented=False):
+    decoder = json
+    if commented:
+        name = "_genosai_jsonc"
+        if name not in sys.modules:
+            path = Path(__file__).resolve().parent / "vendor/jsonc/_util.py"
+            spec = importlib.util.spec_from_file_location(name, path)
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[name] = module
+            try:
+                spec.loader.exec_module(module)
+            except (OSError, ImportError):
+                sys.modules.pop(name, None)
+                raise ConfigError("bundled JSONC parser is unavailable") from None
+        decoder = sys.modules[name]
     try:
-        raw = LOCAL.read_bytes()
+        text = raw.decode("utf-8-sig")
+        if commented: text = decoder._remove_c_comment(text)
+        value = json.loads(text, object_pairs_hook=_object)
+    except (UnicodeError, ValueError):
+        raise ConfigError("local configuration is not valid JSON or JSONC") from None
+    validate(value)
+    return value
+
+
+def load():
+    source = local_path()
+    try:
+        raw = source.read_bytes()
     except FileNotFoundError:
         # A dangling link is an unreadable configured input, not an absent input.
-        if LOCAL.is_symlink():
+        if source.is_symlink():
             raise ConfigError("local configuration link has no target")
         return None, {}
     except OSError:
         raise ConfigError("cannot read local configuration") from None
-    try:
-        value = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=_object)
-    except (UnicodeError, ValueError):
-        raise ConfigError("local configuration is not valid JSON") from None
+    return raw, parse(raw, source.suffix == ".jsonc")
+
+
+def validate(value):
     _fields(value, ("browser", "permissions", "claude", "codex", "pi"), "local configuration")
     browser = value.get("browser", {})
     _fields(browser, ("cdp_url", "agent_profile", "launcher", "auth"), "browser")
@@ -95,7 +143,6 @@ def load():
     if not isinstance(pi.get('profiles',{}),dict): raise ConfigError('invalid Pi profiles')
     for key in ('secret_root','ownership_root'):
         if key in pi and (not isinstance(pi[key],str) or not pi[key]): raise ConfigError('invalid Pi path')
-    return raw, value
 
 
 def _platform_paths(value):
@@ -171,9 +218,13 @@ if __name__ == "__main__":
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('operation',nargs='?',choices=('validate','pi','pi-uninstall'),default='validate')
     parser.add_argument('--platform',choices=('host','wsl','windows'),default='host')
+    parser.add_argument('--require-configured',action='store_true')
     args=parser.parse_args()
     try:
-        if args.operation in ('pi','pi-uninstall'): print(json.dumps(pi_input(args.platform,removing=args.operation=='pi-uninstall')))
+        if args.operation in ('pi','pi-uninstall'):
+            result=pi_input(args.platform,removing=args.operation=='pi-uninstall')
+            if args.require_configured and not result['configured']: raise ConfigError('Pi is unconfigured; choose a private connection profile first')
+            print(json.dumps(result))
         else: load()
     except ConfigError as exc:
         print("invalid local configuration: %s" % exc, file=sys.stderr)

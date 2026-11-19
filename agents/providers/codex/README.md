@@ -6,7 +6,7 @@ native config API. [lifecycle.sh](lifecycle.sh) connects that owner to the share
 existing instruction and skill wiring.
 
 Public defaults require approval on request and limit writes to the workspace. Private operator
-choices belong in `config.local.json` under `codex`; the same native writer applies the composed
+choices belong in `config.local.jsonc` under `codex`; the same native writer applies the composed
 policy and prints changes to owned fields before writing.
 Shared instructions guide the agent's behavior. The accident guards documented by
 [the permission owner](../../permissions/README.md) are integrated separately by Claude Code and Pi;

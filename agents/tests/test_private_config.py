@@ -5,22 +5,48 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import sys
 from pathlib import Path
+from unittest import mock
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import config
 
 AI = Path(__file__).resolve().parents[2]
 
 
 class PrivateConfiguration(unittest.TestCase):
     def test_example_leaves_optional_browser_disabled(self):
-        example = json.loads((AI / "config.local.example.json").read_text())
+        example = config.parse((AI / "config.local.example.jsonc").read_bytes(), commented=True)
         self.assertIsNone(example["browser"]["cdp_url"])
+
+    def test_jsonc_preserves_strings_and_rejects_ambiguous_or_malformed_input(self):
+        example=b'{/* setup */"browser":{"cdp_url":"http://127.0.0.1:9222/a//b"},"pi":{"active":null,"profiles":{}}}// end'
+        self.assertEqual(config.parse(example,True)['browser']['cdp_url'],'http://127.0.0.1:9222/a//b')
+        for raw in (b'{"browser":{},"browser":{}}', b'{"browser":{},}', b'{"pi":{/*broken}',
+                    b'{"browser":{"cdp_url":"private-marker"} invalid}', b'{"pi":{"active":1/*x*/2}}', b'{"claude":{"autoCompactEnabled":tr/*x*/ue}}'):
+            with self.subTest(raw=raw), self.assertRaises(config.ConfigError) as failure:
+                config.parse(raw,True)
+            self.assertNotIn('private-marker',str(failure.exception))
+        with self.assertRaises(config.ConfigError):config.parse(example,False)
+
+    def test_one_local_owner_and_legacy_bytes_survive(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.object(config,'LOCAL',Path(temporary)/'config.local.json'):
+            legacy=config.LOCAL;commented=legacy.with_suffix('.jsonc')
+            raw=b'{"browser":{"cdp_url":null}}'
+            legacy.write_bytes(raw)
+            self.assertEqual(config.load(),(raw,{'browser':{'cdp_url':None}}))
+            commented.write_bytes(b'{// private preferences\n}')
+            with self.assertRaisesRegex(config.ConfigError,'both local'):config.load()
+            self.assertEqual(legacy.read_bytes(),raw)
+            legacy.unlink()
+            self.assertEqual(config.load()[1],{})
 
     def test_local_files_are_excluded_without_parent_ignore_rules(self):
         with tempfile.TemporaryDirectory(prefix="private-config-") as temporary:
             root = Path(temporary)
-            for name in (".gitignore", "config.local.example.json"):
+            for name in (".gitignore", "config.local.example.jsonc"):
                 shutil.copyfile(AI / name, root / name)
-            for name in ("config.local.json", "config.local.json.bak"):
+            for name in ("config.local.json", "config.local.json.bak", "config.local.jsonc", "config.local.jsonc.bak"):
                 (root / name).write_text('{"fixture": "private-local-value"}\n')
             env = dict(os.environ)
             # Only the disposable repository's index may be written.
@@ -36,9 +62,11 @@ class PrivateConfiguration(unittest.TestCase):
             git("init", "-q")
             git("add", ".")
             manifest = git("ls-files", "-z").decode().split("\0")
-            self.assertIn("config.local.example.json", manifest)
+            self.assertIn("config.local.example.jsonc", manifest)
             self.assertNotIn("config.local.json", manifest)
             self.assertNotIn("config.local.json.bak", manifest)
+            self.assertNotIn("config.local.jsonc", manifest)
+            self.assertNotIn("config.local.jsonc.bak", manifest)
 
             # Prove the fixture would expose private files without the owned rule.
             (root / ".gitignore").write_text("")

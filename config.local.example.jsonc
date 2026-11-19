@@ -1,0 +1,92 @@
+// GenosAI private overrides. `make init` copies this to ignored config.local.jsonc.
+// Keep this tracked example synthetic. Put key VALUES in ignored secrets/ or a
+// native credential store; this file contains preferences and file references only.
+//
+// Omit a key to inherit its component default. Objects merge; Claude permission
+// allow/deny/ask arrays append unique rules; other arrays replace. No environment
+// variable interpolation is performed. Paths below are examples, not discovered
+// workstation locations. Use forward slashes on Windows (or escape backslashes).
+//
+// `make check` validates without installing, starting clients or contacting APIs.
+// Then explicitly select a provider with `make install PROVIDER=...`.
+// Existing config.local.json is still supported: keep ONE local file, never both.
+// JSONC supports // and /* */ comments. Use ordinary JSON syntax otherwise;
+// trailing commas are intentionally rejected. Native provider files stay JSON/TOML.
+{
+  // Optional browser connection: null means no endpoint has been configured.
+  // Start/authorize your browser separately; configuration never starts it.
+  "browser": {
+    "cdp_url": null
+    // Set cdp_url to "http://127.0.0.1:9222" only for your own local browser.
+    // Optional browser profile and launcher (omit until needed):
+    // , "agent_profile": {"linux": "/srv/browser-profile", "win": "C:/BrowserProfile", "wsl": "/mnt/c/BrowserProfile"}
+    // , "launcher": "/srv/browser-tools/start-browser.sh"
+    // Optional cookie-vault helpers: paths only, never cookie values.
+    // , "auth": {
+    //     "cookies_dir": {"linux": "/srv/browser-auth", "win": "C:/BrowserAuth"},
+    //     "importer": "/srv/browser-tools/import-cookies.py",
+    //     "staging_dir": "/srv/browser-staging"
+    //   }
+    // Every profile/auth path also accepts a single string for one platform.
+    // See agents/skills/drive-browser/references/local-setup.md for resolution.
+  },
+
+  // Extra file-edit roots are an explicit access grant. An empty list grants none.
+  // Use narrow ABSOLUTE roots, e.g. ["/srv/projects/example/tmp"]. Home, drive
+  // and protected policy roots refuse. This does not grant shell execution.
+  "permissions": {"extra_write_roots": []},
+
+  // Sparse Claude additions inherit the managed safety posture. Do not copy the
+  // complete native settings file here; hooks are generated and cannot be replaced.
+  // Apply through its reviewed plan: make install PROVIDER=claude, review the plan,
+  // then repeat with APPROVE=<plan-id>. A local edit invalidates old approval.
+  "claude": {
+    "permissions": {
+      // To protect a project-relative directory, replace [] below with
+      // ["Read(./private-notes/**)"]. Empty means no additional rules.
+      "deny": []
+      // Optional narrow rules: , "ask": ["Bash(npm publish *)"]
+      // Existing allow/deny/ask protections cannot be removed by replacing an array.
+    }
+    // Optional native preferences (omit to leave them unmanaged):
+    // , "model": "sonnet"
+    // , "autoCompactEnabled": true
+    // , "env": {"EXAMPLE_FEATURE": "1"}
+    // , "enabledPlugins": {"example-plugin@example-marketplace": true}
+    // Plugin names here are illustrative; install/authorize real plugins separately.
+    // The provider's user-settings.json and local-settings.types.json own supported
+    // settings and types. Unknown keys or weakened managed guard posture refuse.
+  },
+
+  // Codex uses its native versioned writer; unrelated native settings survive.
+  // These repeat conservative defaults for visibility. Omit to inherit them.
+  "codex": {"approval_policy": "on-request", "sandbox_mode": "workspace-write"},
+
+  // Pi remains disabled until you define AND select your own profile.
+  // A profile ID is an arbitrary local label. Provider/model IDs must match the
+  // pinned runtime catalog, or use a supported explicit compatible-model definition.
+  "pi": {
+    "active": null,
+    "profiles": {}
+    // To opt in, REPLACE active/profiles above with the two fields from
+    // agents/providers/pi/runtime/profiles.example.json (do not add duplicates).
+    // That example selects "example" and references "secrets/provider.key".
+    // Put your actual key in ignored secrets/provider.key, then explicitly run
+    // make install PROVIDER=pi RUNTIME=1 to acquire the pinned runtime.
+    // Subsequent launches: pi-sot, or pi-sot --profile example --version.
+    // Optional profile fields: thinking, endpoint, api, compatibleModel.
+    // See agents/providers/pi/runtime/README.md for catalog/compatibility rules.
+    // Add multiple profiles under profiles; only the selected credential is needed.
+    //
+    // Credentials default to this checkout's secrets/ directory. To keep files
+    // elsewhere: , "secret_root": "/srv/private-agent-keys"
+    // A credential reference "secrets/provider.key" then resolves to
+    // /srv/private-agent-keys/provider.key, not a second nested secrets/ directory.
+    // Relative secret_root paths resolve from the checkout root, not the shell cwd.
+    //
+    // Migration only: , "ownership_root": "/srv/previous-agent-checkout"
+    // Normally OMIT ownership_root. It identifies an existing native projection;
+    // it does not change the source checkout. Transfer ownership through the owner
+    // before removing an old checkout; never use it to bypass a collision refusal.
+  }
+}
