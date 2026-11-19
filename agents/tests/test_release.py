@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import sys
 import unittest
+from unittest import mock
 import skilltree as ST
 
 AI=Path(__file__).resolve().parents[2]
@@ -25,6 +26,23 @@ class Distribution(unittest.TestCase):
         manifest=source/'tools/source-manifest.json'
         manifest.parent.mkdir(parents=True,exist_ok=True)
         manifest.write_text(json.dumps({'version':1,'files':sorted(['tools/source-manifest.json',*names])})+'\n')
+
+    @unittest.skipUnless(os.name=='posix','Unix executable permissions')
+    def test_export_preserves_executable_hooks_without_setup_repair(self):
+        source=self.base/'source';source.mkdir()
+        names=['.githooks/pre-commit','.githooks/pre-push']
+        self.admit(source,*names)
+        for name in names:
+            file=source/name;file.parent.mkdir(exist_ok=True)
+            file.write_text('#!/bin/sh\nexit 0\n');file.chmod(0o755)
+        destination=self.base/'export'
+        release.export(source,destination)
+        for name in names:
+            self.assertEqual((destination/name).read_bytes(),(source/name).read_bytes())
+            self.assertTrue(os.access(destination/name,os.X_OK),'export discarded executable hook mode')
+        with mock.patch.object(release.shutil,'copy',side_effect=shutil.copyfile):
+            with self.assertRaisesRegex(ValueError,'executable permissions'):
+                release.export(source,self.base/'mode-losing-filesystem')
 
     def test_unreviewed_nested_file_refuses_export_without_creating_destination(self):
         for directory in ('agents','integrations'):

@@ -21,7 +21,7 @@ class ReleaseHooks(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.base=Path(self.temp.name);self.root=self.base/'source';self.root.mkdir()
         for source in release.source_files(ROOT):
-            target=self.root/source.relative_to(ROOT);target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,target)
+            target=self.root/source.relative_to(ROOT);target.parent.mkdir(parents=True,exist_ok=True);shutil.copy(source,target)
         self.env=dict(os.environ,HOME=str(self.base/'home'),PYTHONDONTWRITEBYTECODE='1')
         for key in ('GIT_DIR','GIT_WORK_TREE','GIT_INDEX_FILE'):self.env.pop(key,None)
         self.git('init','-q')
@@ -37,6 +37,41 @@ class ReleaseHooks(unittest.TestCase):
         result=subprocess.run([BASH,(self.root/'.githooks'/name).as_posix()],cwd=self.root,env=self.env,capture_output=True,text=True)
         self.assertEqual(self.git('ls-files','--stage','-z'),before)
         return result
+
+    @unittest.skipUnless(os.name=='posix','Unix executable permissions')
+    def test_non_executable_hook_refuses_without_source_or_config_changes(self):
+        hooks=[self.root/'.githooks'/name for name in ('pre-commit','pre-push')]
+        hooks[0].chmod(0o644)
+        before=[(p.read_bytes(),p.stat().st_mode) for p in hooks]
+        configuration=(self.root/'.git/config').read_bytes()
+        index=self.git('ls-files','--stage','-z')
+        result=self.setup('hooks')
+        self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+        self.assertIn('not executable',result.stderr)
+        self.assertEqual([(p.read_bytes(),p.stat().st_mode) for p in hooks],before)
+        self.assertEqual((self.root/'.git/config').read_bytes(),configuration)
+        self.assertEqual(self.git('ls-files','--stage','-z'),index)
+
+    @unittest.skipUnless(os.name=='posix' and shutil.which('make'),'Unix checkout and Make')
+    def test_init_and_hooks_preserve_a_clean_executable_checkout(self):
+        self.git('config','core.filemode','true')
+        # Local permissions can be narrower than Git's single executable bit.
+        (self.root/'.githooks/pre-commit').chmod(0o750)
+        self.git('add','.')
+        self.git('-c','core.hooksPath='+os.devnull,'-c','user.name=Fixture',
+                 '-c','user.email=fixture@example.invalid','-c','commit.gpgsign=false',
+                 'commit','-qm','Synthetic clean-checkout fixture')
+        self.assertEqual(self.git('status','--porcelain=v1','--untracked-files=all'),b'')
+        hooks=[self.root/'.githooks'/name for name in ('pre-commit','pre-push')]
+        before=[(p.read_bytes(),p.stat().st_mode) for p in hooks]
+        index=self.git('ls-files','--stage','-z')
+        for operation in ('hooks','init','init','hooks'):
+            result=subprocess.run(['make',operation,'PYTHON='+sys.executable],cwd=self.root,
+                                  env=self.env,capture_output=True,text=True)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertEqual(self.git('status','--porcelain=v1','--untracked-files=all'),b'')
+            self.assertEqual([(p.read_bytes(),p.stat().st_mode) for p in hooks],before)
+            self.assertEqual(self.git('ls-files','--stage','-z'),index)
 
     def test_registration_is_local_repeatable_and_preserves_local_json(self):
         local=self.root/'config.local.json';raw=b'{"browser":{"cdp_url":null}}\n';local.write_bytes(raw)

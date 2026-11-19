@@ -107,7 +107,9 @@ def export(root,destination):
     manifest={}
     for file in files:
         relative=file.relative_to(root);target=destination/relative
-        target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(file,target)
+        target.parent.mkdir(parents=True,exist_ok=True);shutil.copy(file,target)
+        if os.name=='posix' and bool(file.stat().st_mode & 0o111)!=bool(target.stat().st_mode & 0o111):
+            raise ValueError('export destination did not preserve executable permissions: '+relative.as_posix())
         manifest[relative.as_posix()]=hashlib.sha256(target.read_bytes()).hexdigest()
     return manifest
 

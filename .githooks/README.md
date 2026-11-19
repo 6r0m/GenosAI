@@ -5,6 +5,12 @@ Git configuration. Existing foreign hook configuration or active hooks cause a
 refusal; integrate them deliberately instead of silently disabling them.
 Source archives without their own Git repository skip registration.
 
+Registration preserves tracked source bytes and permissions. Both hook scripts must
+be recorded in Git as executable (`100755`); Unix setup refuses non-executable hooks
+instead of repairing their modes. Source export preserves executable permissions.
+An export destination that strips Unix executable bits refuses instead of reporting
+a usable distribution; use a filesystem that preserves them.
+
 - `pre-commit` checks the complete staged snapshot against its own reviewed source
   manifest, private-file rules, personal-path candidates and Gitleaks 8.30.1.
 - `pre-push` reuses the working-source, index and all-ref Git-history checks.

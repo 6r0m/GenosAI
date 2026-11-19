@@ -30,7 +30,8 @@ def install_hooks():
     for name in ('pre-commit','pre-push'):
         path=ROOT/'.githooks'/name
         if path.is_symlink() or not path.is_file(): raise ValueError('missing or linked release hook')
-        path.chmod(path.stat().st_mode | 0o111)
+        if os.name=='posix' and not os.access(path,os.X_OK):
+            raise ValueError('release hook is not executable; restore executable checkout permissions: '+name)
     subprocess.run(['git','-C',str(ROOT),'config','--local','core.hooksPath','.githooks'],check=True)
     print('Local pre-commit/pre-push release checks registered; Gitleaks 8.30.1 is required.')
 
