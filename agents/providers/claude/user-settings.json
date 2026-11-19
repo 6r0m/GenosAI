@@ -1,0 +1,119 @@
+{
+  "env": {
+    "CLAUDE_CODE_USE_POWERSHELL_TOOL": "0"
+  },
+  "permissions": {
+    "allow": [],
+    "deny": [
+      "Edit(//**/System Volume Information/**)",
+      "Edit(//opt/**)",
+      "Edit(//var/**)",
+      "Edit(//srv/**)",
+      "Read(//**/.ssh/**)",
+      "Read(//**/.gnupg/**)",
+      "Read(//**/.aws/**)",
+      "Read(//**/.kube/**)",
+      "Read(//**/.docker/**)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Edit(//**/.claude/hooks/**)",
+      "Edit(//**/.ssh/**)",
+      "Edit(//**/.gnupg/**)",
+      "Edit(//**/.aws/**)",
+      "Edit(//c/Windows/**)",
+      "Edit(//c/Program Files/**)",
+      "Edit(//c/Program Files (x86)/**)",
+      "Edit(//c/ProgramData/**)",
+      "Edit(//mnt/c/Windows/**)",
+      "Edit(//mnt/c/Program Files/**)",
+      "Edit(//mnt/c/Program Files (x86)/**)",
+      "Edit(//mnt/c/ProgramData/**)",
+      "Edit(//etc/**)",
+      "Edit(//usr/**)",
+      "Edit(//boot/**)",
+      "Edit(//**/.claude/settings.json)",
+      "Edit(//**/.claude/settings.local.json)",
+      "Edit(//**/.mcp.json)",
+      "Edit(./.mcp.json)",
+      "Bash(rm -rf .git)",
+      "Bash(rm -rf ./.git:*)",
+      "Bash(rm -f .git/index)",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf ~)",
+      "Bash(rm -rf $HOME*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f *)",
+      "Bash(git reset --hard*)",
+      "Bash(git clean -fdx*)",
+      "Bash(sudo *)",
+      "Bash(sudo)",
+      "Bash(sh)",
+      "Bash(bash)",
+      "Bash(git commit *)",
+      "Bash(git commit)",
+      "Bash(git push *)",
+      "Bash(git push)",
+      "PowerShell"
+    ],
+    "ask": [],
+    "defaultMode": "default"
+  },
+  "model": null,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exec bash \"@AGENTS_ROOT@/permissions/run-guard.sh\" bash_rm_guard.py",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exec bash \"@AGENTS_ROOT@/permissions/run-guard.sh\" repo_guard.py"
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Bash|Monitor",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "exec bash \"@AGENTS_ROOT@/permissions/run-guard.sh\" rm_scope_allow.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"@AGENTS_ROOT@/providers/claude/session-check.sh\" || printf '%s\\n' '{\"systemMessage\":\"Claude settings drift check could not run; run the permission selfcheck.\"}'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": null,
+  "extraKnownMarketplaces": null,
+  "sandbox": null,
+  "modelSettings": null,
+  "pluginConfigs": null,
+  "autoUpdatesChannel": null,
+  "skipDangerousModePermissionPrompt": null,
+  "skipWorkflowUsageWarning": null,
+  "autoCompactEnabled": null,
+  "switchModelsOnFlag": null,
+  "agentPushNotifEnabled": null
+}

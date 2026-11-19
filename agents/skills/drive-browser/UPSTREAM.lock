@@ -1,0 +1,8 @@
+package=@playwright/cli
+version=0.1.17
+upstream_path=skills/playwright-cli/SKILL.md
+vendored_path=references/playwright-cli/COMMANDS.md
+skill_sha256=29c0b669a524d42b51934d7db9144c1c07a566d0549ae6fb6ccd810e5a3cf61b
+vendored=2026-07-29 via playwright-cli install --skills, relocated from cwd
+note=upgrade = reinstall skills to a scratch dir, re-vendor here, recompute sha, update this pin and the local CLI installation together
+license=references/playwright-cli/LICENSE (from the same pinned package)

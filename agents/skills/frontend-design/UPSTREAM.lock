@@ -1,0 +1,8 @@
+upstream=https://github.com/anthropics/skills
+commit=41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f
+upstream_path=skills/frontend-design/SKILL.md
+vendored_path=SKILL.md
+skill_sha256=d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3
+license=Apache-2.0; LICENSE.txt vendored beside SKILL.md from the same commit, both files unmodified
+vendored=2026-09-25 from the commit above, byte-identical
+note=upgrade = choose a new commit, read its diff, copy SKILL.md and LICENSE.txt from https://raw.githubusercontent.com/anthropics/skills/<commit>/skills/frontend-design/, recompute skill_sha256, update commit and vendored

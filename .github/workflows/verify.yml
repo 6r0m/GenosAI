@@ -1,0 +1,37 @@
+name: Source preparation
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.8.0'
+      - name: Install pinned scanner
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/scanner"
+          cd "$RUNNER_TEMP/scanner"
+          curl --fail --location --silent --show-error -O https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz
+          curl --fail --location --silent --show-error -O https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt
+          grep '  gitleaks_8.30.1_linux_x64.tar.gz$' gitleaks_8.30.1_checksums.txt | sha256sum --check --strict
+          tar -xzf gitleaks_8.30.1_linux_x64.tar.gz gitleaks
+          echo "$RUNNER_TEMP/scanner" >> "$GITHUB_PATH"
+      - run: make check
+      - run: make test
+      - run: make public-check
+      - name: Verify standalone artifact
+        shell: bash
+        run: |
+          make export DEST="$RUNNER_TEMP/source"
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C "$RUNNER_TEMP/source" -cf "$RUNNER_TEMP/source.tar" .
+          mkdir "$RUNNER_TEMP/extracted"
+          tar -C "$RUNNER_TEMP/extracted" -xf "$RUNNER_TEMP/source.tar"
+          python3 tools/release.py check "$RUNNER_TEMP/extracted" --artifact
+          make -C "$RUNNER_TEMP/extracted" init check

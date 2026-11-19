@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implement Approved Change"
+  short_description: "Implement an approved todo with test-first proof and stable docs"
+  default_prompt: "Implement the explicitly approved todo using regression-first evidence, the smallest architecture-aligned change, full verification, and correct stable documentation ownership."

@@ -1,0 +1,10 @@
+{
+  "name": "agents-sot",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "pi": {
+    "extensions": ["providers/pi/permissions/adapter.js"],
+    "skills": ["skills/*/SKILL.md", "!skills/synced/**"]
+  }
+}

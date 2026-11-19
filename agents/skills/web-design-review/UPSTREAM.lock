@@ -1,0 +1,8 @@
+upstream=https://github.com/vercel-labs/web-interface-guidelines
+commit=e3d624baaf29dc1fc645aff3e38f03e564d2d6b1
+upstream_path=command.md
+vendored_path=references/vendor/web-interface-guidelines/command.md
+skill_sha256=5a775e6411f790f518dbc9c1fa7c50a89e6873502d9a3530a6eb223a590bcfe8
+license=MIT; LICENSE vendored beside command.md from the same commit, both files unmodified
+vendored=2026-09-25 from the commit above, byte-identical
+note=upgrade = choose a new commit, read its diff, copy command.md and LICENSE from https://raw.githubusercontent.com/vercel-labs/web-interface-guidelines/<commit>/, recompute skill_sha256, update commit and vendored; recheck SKILL.md clause 4 if the capitalization rule changed

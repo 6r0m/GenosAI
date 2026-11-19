@@ -1,0 +1,17 @@
+{
+  "active": "primary",
+  "profiles": {
+    "primary": {
+      "provider": "deepseek",
+      "model": "deepseek-flash",
+      "credential": "secrets/primary.key",
+      "thinking": "high"
+    },
+    "secondary": {
+      "provider": "anthropic",
+      "model": "claude-haiku-4-5",
+      "credential": "secrets/secondary.key",
+      "thinking": "low"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "active": "example",
+  "profiles": {
+    "example": {
+      "provider": "deepseek",
+      "model": "deepseek-flash",
+      "credential": "secrets/provider.key"
+    }
+  }
+}

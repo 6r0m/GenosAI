@@ -1,0 +1,5 @@
+# Keep executable source and pinned references stable across Git clients.
+* text=auto eol=lf
+
+# Preserve the license bytes from the pinned upstream package archive.
+agents/skills/drive-browser/references/playwright-cli/LICENSE -text

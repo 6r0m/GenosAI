@@ -1,0 +1,4 @@
+interface:
+  display_name: "Architect"
+  short_description: "Judge whether a change is the right change and whether the design holds"
+  default_prompt: "Assess this against the real repository evidence: is it the right change at all, does it sit with the right owner, and — where an implementation exists — does the diff match what was agreed. Return a PASS/PATCH/BLOCKER/UNVERIFIED verdict. Do not implement anything."

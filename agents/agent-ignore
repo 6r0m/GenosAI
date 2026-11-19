@@ -1,0 +1,35 @@
+# Paths that agent search sweeps must not surface. gitignore syntax; ripgrep
+# applies it through RIPGREP_CONFIG_PATH (wired by scripts/install.sh), so it
+# reaches every repository on this machine without a per-repo file and without
+# giving git an opinion.
+#
+# It filters sweeps only. git still tracks and commits these paths normally, and
+# three routes still read them: `cat <path>`, naming the directory as the search
+# argument (`rg <pattern> todo/done`, since ripgrep never ignores a path given
+# explicitly), and `rg --no-ignore-files` for a deliberate whole-tree sweep.
+# Plain --no-ignore does NOT lift this: ripgrep documents that it does not imply
+# --no-ignore-files, because --ignore-file is an explicit argument.
+#
+# That is the intent: these paths stay as receipts, they stop answering a search
+# with decisions that were true only mid-task.
+#
+# Every pattern must start with `**/`. An --ignore-file lives outside the tree
+# it filters, so a path pattern like `todo/done/` anchors to the directory the
+# search was started from and misses a sweep launched from a subdirectory.
+
+# Finished-todo receipts, under any of the names the convention actually takes:
+# an ordering prefix or a suffix on either segment (todo/01_done, 01_todo/done,
+# 2026_todo/03_done, todo.old/done.1) and any casing (TODO/DONE, ToDo/Done).
+#
+# This is glob, not regex, so the affixes are `*` (which matches zero characters
+# too, covering the bare todo/done) and the casing is spelled out per character.
+# A tighter affix class cannot be written here: globset accepts an empty brace
+# alternate like `{,[0-9]*_}` but never matches through it, which would silently
+# drop bare `todo/` from the pattern. Verified against ripgrep 13 by
+# tests/test_agent_ignore.py, which also guards the collateral listed below.
+#
+# Collateral, accepted: the leading/trailing `*` also hide a `*todo*` directory
+# whose child merely contains the letters `done` out of order of intent
+# (nottodo/redone). No such pair exists in practice, and both halves would still
+# have to be named after this convention to collide.
+**/*[Tt][Oo][Dd][Oo]*/*[Dd][Oo][Nn][Ee]*/

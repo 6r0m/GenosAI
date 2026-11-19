@@ -1,0 +1,48 @@
+{
+  "active": "arbitrary-messages",
+  "profiles": {
+    "arbitrary-chat": {
+      "provider": "fixture-completions",
+      "model": "fixture-chat",
+      "credential": "secrets/fixture-chat.key",
+      "endpoint": "https://completions.example.invalid/v1",
+      "api": "openai-completions",
+      "thinking": "high",
+      "compatibleModel": {
+        "name": "Synthetic completions fixture",
+        "reasoning": true,
+        "input": ["text"],
+        "contextWindow": 64000,
+        "maxTokens": 8192,
+        "thinkingLevelMap": {
+          "off": "no_think",
+          "minimal": null,
+          "low": null,
+          "medium": null,
+          "high": "high",
+          "xhigh": null,
+          "max": null
+        },
+        "compat": {
+          "supportsReasoningEffort": true,
+          "thinkingFormat": "openai",
+          "maxTokensField": "max_tokens"
+        }
+      }
+    },
+    "arbitrary-messages": {
+      "provider": "fixture-messages",
+      "model": "fixture-messages",
+      "credential": "secrets/fixture-messages.key",
+      "endpoint": "https://messages.example.invalid",
+      "api": "anthropic-messages",
+      "compatibleModel": {
+        "name": "Synthetic messages fixture",
+        "reasoning": false,
+        "input": ["text"],
+        "contextWindow": 64000,
+        "maxTokens": 8192
+      }
+    }
+  }
+}

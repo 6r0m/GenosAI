@@ -1,0 +1,17 @@
+{
+  "env": "dict",
+  "permissions": "dict",
+  "model": "str",
+  "hooks": "dict",
+  "enabledPlugins": "dict",
+  "extraKnownMarketplaces": "dict",
+  "sandbox": "dict",
+  "modelSettings": "dict",
+  "pluginConfigs": "dict",
+  "autoUpdatesChannel": "str",
+  "skipDangerousModePermissionPrompt": "bool",
+  "skipWorkflowUsageWarning": "bool",
+  "autoCompactEnabled": "bool",
+  "switchModelsOnFlag": "bool",
+  "agentPushNotifEnabled": "bool"
+}

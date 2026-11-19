@@ -1,0 +1,4 @@
+interface:
+  display_name: "Investigate Change"
+  short_description: "Research a repository change and create one reviewable todo"
+  default_prompt: "Investigate this requested change against the existing repository architecture and create a reviewable todo. Do not implement it."

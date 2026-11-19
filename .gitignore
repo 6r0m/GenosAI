@@ -1,0 +1,25 @@
+# Workstation references and preferences; the example remains public.
+/config.local.json
+/config.local.json.*
+
+# Private authentication references and runtime state never enter a source export.
+/secrets/*
+!/secrets/README.md
+/tmp/
+/agents/skills/synced/
+/agents/skills/.trash/
+.playwright/
+.playwright-cli/
+node_modules/
+__pycache__/
+*.py[cod]
+*.key
+*.pem
+*.p12
+*.pfx
+*.log
+*.bak
+*.tmp
+.env
+.env.*
+!.env.example
