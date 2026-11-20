@@ -20,7 +20,10 @@ and timeouts block with a reason. A timeout terminates the spawned shell/interpr
 whether exit was observed. [Adapter tests](../../../tests/providers/pi/adapter.test.js) exercise a real sleeping
 interpreter and native PID checks, separately from injectable timeout-refusal tests.
 
-Run the external loaded check after installation and Pi upgrades, plus [the shared selfcheck](../../../permissions/README.md#verifying) on each platform.
+Run the external loaded check after installation and Pi upgrades on each platform. It exercises the
+shared guards through Pi without requiring another provider. When Claude is also installed, run
+[the shared selfcheck](../../../permissions/README.md#verifying), which additionally validates Claude
+registration and settings.
 The acceptance [probe fixture](../../../tests/providers/pi/probe.js) is excluded from the package and loaded explicitly only in
 controlled scratch checks. Its output/request limits apply only to acceptance. The acceptance SDK
 runner preserves native boundary dispatch and explicitly ends the generation; its transport guard

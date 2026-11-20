@@ -11,7 +11,7 @@
 [The local package manifest](../../package.json) registers this provider's extension and the canonical
 skills. [Provider tests](../../tests/providers/README.md) own deterministic and installed-route proof.
 
-Installation validates the connection, credential reference and existing projections before creating
+Installation validates any configured connection, credential reference and existing projections before creating
 wiring or registering the local package. An existing runtime supplies catalog and installed-version
 validation before acquisition; a missing runtime is acquired from the checked-in install lock with
 `npm ci` only after the available checks pass, then its catalog is validated before wiring. If that

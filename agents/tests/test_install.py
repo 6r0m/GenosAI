@@ -7,7 +7,7 @@ from a copy of ai/agents/ into a sandbox home, with a planted non-skill tree sta
 The real cache is untracked, so without the planted tree the leak assertion would pass on any checkout
 that simply lacks it.
 
-The Windows half is out of reach here by design: install.sh takes the Windows profile from cmd.exe,
+The Windows half is out of reach here by design: install.sh takes the Windows profile from PowerShell,
 not from HOME, so every run gets an explicit environment whose PATH resolves no Windows executable, and
 the tests skip rather than run when one would resolve.
 """
@@ -327,15 +327,65 @@ class ProviderLifecycle(InstallerWiring):
         self.assertIn('Windows side skipped', result.stderr)
         self.assertNotIn('Done:', result.stdout)
 
-    def test_missing_key_refuses_before_runtime_or_wiring(self):
+    def test_missing_key_allows_install_but_launch_refuses_without_mutation(self):
         self.prepare_runtime()
         os.unlink(os.path.join(self.tmp, 'repo/secrets/primary.key'))
+        self.assert_partial_operation(self.lifecycle('install', '--runtime'))
         before = _snapshot(self.home)
-        result = self.lifecycle('install', '--runtime')
-        self.assertNotEqual(result.returncode, 0, result.stdout+result.stderr)
+        launcher = os.path.join(self.home, '.local/bin/pi-sot')
+        result = subprocess.run([launcher], env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
         self.assertIn('credential file missing', result.stderr)
         self.assertEqual(_snapshot(self.home), before)
-        self.assertFalse(os.path.exists(self.record), 'npm and native registration must not run')
+
+    def test_windows_unicode_link_queue_selects_utf8_before_commands(self):
+        native_home = os.path.join(self.tmp, 'windows-home')
+        os.makedirs(os.path.join(native_home, 'AppData/Local/Temp'))
+        script = r'''powershell.exe() {
+          if [[ "$*" == *GetFolderPath* ]]; then printf 'C:\\Users\\Тестовый пользователь\r\n'; fi
+        }
+        cmd.exe() { return 1; }
+        timeout() { shift; "$@"; }
+        wslpath() {
+          if [[ "$1" == -u ]]; then printf '%s\n' "$FIXTURE_WIN_HOME";
+          else printf 'D:\\Source\\%s\n' "${2##*/}"; fi
+        }
+        export -f powershell.exe cmd.exe wslpath timeout
+        exec bash "$1" --provider shared --platform windows
+        '''
+        env = {'HOME': self.home, 'PATH': SAFE_PATH, 'TMPDIR': self.tmp,
+               'FIXTURE_WIN_HOME': native_home}
+        result = subprocess.run(['bash', '-c', script, 'fixture',
+                                 os.path.join(self.copy, 'scripts/install.sh')],
+                                env=env, capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Queued NT links', result.stdout, result.stdout + result.stderr)
+        batch = os.path.join(native_home, 'AppData/Local/Temp/agents-sot-links.cmd')
+        with open(batch, 'rb') as stream: raw = stream.read()
+        self.assertNotIn(b'\n', raw.replace(b'\r\n', b''))
+        commands = raw.decode('utf-8').splitlines()
+        self.assertEqual(commands[:2], ['@echo off', 'chcp 65001 >nul || exit /b 1'])
+        self.assertIn('Тестовый пользователь', commands[2])
+        self.assertTrue(commands[2].startswith('mklink '))
+        self.assertFalse(os.path.exists(os.path.join(native_home, '.agents/AGENTS.md')))
+
+    def test_unconfigured_runtime_installs_and_version_works_without_projection(self):
+        self.prepare_runtime()
+        with open(os.path.join(self.copy, 'providers/pi/runtime/profiles.json'), 'w') as stream:
+            json.dump({'active': None, 'profiles': {}}, stream)
+        shutil.rmtree(os.path.join(self.tmp, 'repo/secrets'))
+        self.assert_partial_operation(self.lifecycle('install', '--runtime'))
+        agent = os.path.join(self.home, '.pi/agent')
+        for name in ('auth.json', 'models.json', 'agents-sot-state.json'):
+            self.assertFalse(os.path.exists(os.path.join(agent, name)))
+        launcher = os.path.join(self.home, '.local/bin/pi-sot')
+        before = _snapshot(self.home)
+        result = subprocess.run([launcher, '--version'], env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        result = subprocess.run([launcher], env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unconfigured', result.stderr)
+        self.assertEqual(_snapshot(self.home), before)
 
     def test_projection_collision_refuses_before_runtime_or_wiring(self):
         self.prepare_runtime()
@@ -511,7 +561,7 @@ else: shutil.rmtree(package)
         launcher = os.path.join(self.home, '.local/bin/pi-sot')
         config_path = os.path.join(self.copy, 'providers/pi/runtime/profiles.json')
         def launch():
-            return subprocess.run(['bash', launcher, '--version'], env=self.env,
+            return subprocess.run(['bash', launcher], env=self.env,
                                   capture_output=True, text=True, timeout=30)
         self.assertEqual(launch().returncode, 0)
         with open(config_path, 'w') as stream:

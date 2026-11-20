@@ -19,7 +19,20 @@ install/remove and managed launch disable Pi telemetry explicitly.
 
 ## Change a Pi connection
 
-First copy [the connection example](profiles.example.json) into the private root `pi` object,
+Installation can precede connection setup:
+
+```bash
+make install PROVIDER=pi PLATFORM=both RUNTIME=1
+pi-sot --version
+```
+
+Use `PLATFORM=host` for Linux/WSL only. Both-platform installation requires Linux Node/npm and native
+Windows Node/Git Bash. Missing prerequisites refuse with guidance; installation never installs system Node.
+Windows instruction file links need Developer Mode or the installer's explicitly reported elevated batch.
+An unconfigured installation registers the local package without creating auth/model projections.
+An existing managed connection cannot be cleared by replacing its profile with disabled defaults.
+
+Before starting a model session, copy [the connection example](profiles.example.json) into the private root `pi` object,
 choose your own provider/model, and supply the referenced key. Public defaults intentionally
 configure no connection. Install the selected integration before using its default or an explicit profile:
 
@@ -165,8 +178,8 @@ refuses managed launch even when the profile has no endpoint override; it is nev
 
 Credential files belong to [the local secret owner](../../../../secrets/README.md). Profiles contain file
 references only. Platform-specific auth commands defer key access to Pi; no plaintext key is copied to
-tracked config or logs, and no global API-key environment variable is installed. Installation and
-launch require a readable regular credential file; validation uses metadata without reading its contents.
+tracked config or logs, and no global API-key environment variable is installed. Installation does not require a credential file or create a placeholder. Model-session launch requires a
+readable regular credential file; validation uses metadata without reading its contents.
 Pi install telemetry is disabled. Provider account budgets remain operator-managed.
 
 `auth.json` and optional `models.json` are projections. A SOT ownership record identifies managed entries;

@@ -39,6 +39,11 @@ esac
 config_args=("$task_dir" "$task_root" "$task_cli" "${PI_PACKAGE##*@}")
 selection_args=()
 [[ -z "$selected_profile" ]] || selection_args=("$selected_profile")
+# Read-only startup checks do not select or project a connection.
+if [[ $# == 1 && ( "$1" == --version || "$1" == --help || "$1" == -h ) && -z "$selected_profile" ]]; then
+  "$task_node" "$SCRIPT_DIR/configure.js" validate "$task_dir" "$task_root" "$task_cli" "${PI_PACKAGE##*@}" --setup --local <<<"$local_json" >/dev/null
+  exec "$task_node" "$task_cli" "$@"
+fi
 # Native subcommands are recognized only at argv[0], before ordinary prompt parsing.
 case "${1-}" in
   list)

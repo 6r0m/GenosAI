@@ -265,12 +265,14 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  result=launch('--profile','alternate','list');assert.equal(result.status,0,result.stderr);
  assert.deepEqual(JSON.parse(fs.readFileSync(record)),['list']);assert.deepEqual(snapshot(),beforeSelection);
  for(const args of [['--','--profile','literal'],['--system-prompt','--profile','-p','literal'],['--version'],['--help']]) {
+  const beforeInfo=snapshot();
   result=launch(...args);assert.equal(result.status,0,result.stderr);
-  assert.deepEqual(JSON.parse(fs.readFileSync(record)),['--provider','deepseek','--model','deepseek-flash','--thinking','max',...args]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(record)),args.length===1 ? args : ['--provider','deepseek','--model','deepseek-flash','--thinking','max',...args]);
   assert.equal(fs.readFileSync(profileFile,'utf8'),policyBefore);
+  if(args.length===1)assert.deepEqual(snapshot(),beforeInfo);
  }
  const configScript=path.join(runtime,'configure.js'),ownerSource=fs.readFileSync(configScript,'utf8');
- const selectionAnchor="  const chosen = op === 'uninstall' ? null : resolveProfiles(profiles !== undefined ? profiles : readProfiles(profileFile ?? defaultProfileFile));";
+ const selectionAnchor="  const chosen = op === 'uninstall' ? null : resolveProfiles(profiles !== undefined ? profiles : readProfiles(profileFile ?? defaultProfileFile), setup);";
  assert.equal(ownerSource.split(selectionAnchor).length,2);
  const racePolicy={...JSON.parse(policyBefore),active:'alternate'};
  const replacement=JSON.parse(JSON.stringify(racePolicy));
@@ -354,4 +356,26 @@ test('thinking capability resolves the native dependency in hoisted and nested l
   fs.rmSync(ai,{recursive:true,force:true});
  }
  await assert.rejects(configure({...o,op:'validate',profiles,cli}),/native Pi dependency missing/,'absent capability dependency must refuse');
+});
+
+test('setup accepts only the exact disabled profile and preserves foreign native data',async t=>{
+ const o=fixture(t),profiles={active:null,profiles:{}};
+ fs.rmSync(path.join(o.root,'secrets'),{recursive:true});
+ const foreign={foreign:{type:'api_key',key:'synthetic-foreign'}};
+ fs.writeFileSync(path.join(o.dir,'auth.json'),JSON.stringify(foreign));
+ const before=fs.readFileSync(path.join(o.dir,'auth.json'),'utf8');
+ await configure({...o,profiles,setup:true,op:'validate'});
+ await configure({...o,profiles,setup:true});
+ assert.deepEqual(fs.readdirSync(o.dir),['auth.json']);
+ assert.equal(fs.readFileSync(path.join(o.dir,'auth.json'),'utf8'),before);
+ await assert.rejects(configure({...o,profiles}),/unconfigured/);
+ await assert.rejects(configure({...o,profiles:{...profiles,unknown:true},setup:true}),/unknown/);
+ await assert.rejects(configure({...o,profiles:{active:null,profiles:{first:one().profiles.first}},setup:true}),/active/);
+ assert.equal(fs.readFileSync(path.join(o.dir,'auth.json'),'utf8'),before);
+});
+test('unconfigured setup refuses to discard an existing managed connection',async t=>{
+ const o=fixture(t);await configure(o);
+ const before=fs.readFileSync(path.join(o.dir,'agents-sot-state.json'),'utf8');
+ await assert.rejects(configure({...o,profiles:{active:null,profiles:{}},setup:true}),/existing managed connection/);
+ assert.equal(fs.readFileSync(path.join(o.dir,'agents-sot-state.json'),'utf8'),before);
 });

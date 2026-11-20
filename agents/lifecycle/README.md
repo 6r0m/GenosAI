@@ -73,9 +73,10 @@ directory and `rg --no-ignore-files`. Plain `--no-ignore` does not lift that con
 
 No arguments selects shared instructions/search wiring on the current Linux/WSL host only.
 Choose a provider with `--provider claude|codex|pi`; `--provider all` explicitly requests every provider
-and requires Pi connection input. `--platform windows|both` opts into WSL-to-Windows discovery.
+and installs Pi without requiring connection input. `--platform windows|both` opts into WSL-to-Windows discovery.
 An unavailable requested Windows profile is a failed/partial operation. Ordinary Linux setup does
 not call Windows tools. Native Windows Bash installation is not a claimed acceptance target.
-Pi requires a configured private connection, a supported Node interpreter and (for runtime use) its
-pinned SDK. `--runtime` explicitly opts into dependency acquisition. Keep provider/runtime pins in the
+Pi installation requires a supported Node interpreter and npm for runtime acquisition. A private connection
+and readable credential are required only for model sessions; `pi-sot --version` and `--help` work without
+them. `--runtime` explicitly opts into dependency acquisition. Keep provider/runtime pins in the
 existing registry; optional local/native state never belongs in that registry.

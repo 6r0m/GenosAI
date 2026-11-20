@@ -20,7 +20,8 @@ make test
 ```
 
 Default install wires shared instructions/search on the host only. Choose providers and Windows clients
-explicitly with the options shown by `make help`; Pi additionally needs a private connection profile.
+explicitly with the options shown by `make help`. Pi runtime installation works without credentials;
+model sessions require a private connection profile.
 `config.local.jsonc` holds ignored personal deltas; [the commented example](config.local.example.jsonc) enables
 no connection. Comments explain every shared section and opt-in recipes in one file.
 Existing `config.local.json` is preserved; keep just one local file. Keep credentials in ignored local storage or their native application stores.

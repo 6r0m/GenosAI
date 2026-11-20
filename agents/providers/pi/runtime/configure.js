@@ -32,10 +32,13 @@ const object = value => Boolean(value) && typeof value === 'object' && !Array.is
 const quote = s => "'" + s.replaceAll("'", "'\\''") + "'";
 
 // One named schema for connection profiles; every accepted key is deliberate and unknown keys fail closed.
-function resolveProfiles(data) {
-  if(data.active===null && object(data.profiles) && Object.keys(data.profiles).length===0)throw Error('Pi is unconfigured; add a private connection profile');
+function resolveProfiles(data, setup = false) {
   const unknown = Object.keys(data).filter(key => key !== 'active' && key !== 'profiles');
   if(unknown.length)throw Error('unknown profile configuration keys: ' + unknown.join(', '));
+  if(data.active===null && object(data.profiles) && Object.keys(data.profiles).length===0) {
+    if(setup)return null;
+    throw Error('Pi is unconfigured; add a private connection profile to config.local.jsonc before starting a session');
+  }
   if(typeof data.active !== 'string' || !ID.test(data.active))throw Error('invalid active profile id');
   if(!object(data.profiles) || Object.keys(data.profiles).length === 0)throw Error('profiles must be a non-empty object');
   const profiles = {};
@@ -90,6 +93,7 @@ async function verifyCatalog(chosen, cli, expected) {
     const version = read(path.resolve(path.dirname(cli), '../../package.json')).version;
     if(version !== expected)throw Error('installed Pi ' + (version ?? 'unknown') + ' does not match managed pin ' + expected + '; run install.sh --provider pi --runtime');
   }
+  if(!chosen)return;
   const profile = chosen.profiles[chosen.active];
   const aiDir = nativeDependency(cli, '@earendil-works/pi-ai');
   if(!aiDir)throw Error('native Pi dependency missing (is the pinned runtime installed?): @earendil-works/pi-ai');
@@ -133,7 +137,7 @@ function atomic(file, data) {
   try {fs.writeFileSync(temp, JSON.stringify(data, null, 2) + '\n', {mode: 0o600, flag: 'wx'});fs.renameSync(temp, file);}
   finally {if(fs.existsSync(temp))fs.unlinkSync(temp);}
 }
-export async function configure({op, dir, root, secretRoot = path.join(root, "secrets"), profiles, profileFile, requireKey = true, cli, expected, profileId}) {
+export async function configure({op, dir, root, secretRoot = path.join(root, "secrets"), profiles, profileFile, requireKey = true, cli, expected, profileId, setup = false}) {
   root = path.resolve(root);dir = path.resolve(dir);
   secretRoot=path.resolve(secretRoot);
   const credentialPath = reference => {
@@ -147,26 +151,26 @@ export async function configure({op, dir, root, secretRoot = path.join(root, "se
     return resolved;
   };
   if(!['install', 'uninstall', 'validate'].includes(op))throw Error('unsupported configuration operation');
-  const chosen = op === 'uninstall' ? null : resolveProfiles(profiles !== undefined ? profiles : readProfiles(profileFile ?? defaultProfileFile));
+  const chosen = op === 'uninstall' ? null : resolveProfiles(profiles !== undefined ? profiles : readProfiles(profileFile ?? defaultProfileFile), setup);
   if(chosen && profileId !== undefined) {
     if(typeof profileId !== 'string' || !ID.test(profileId))throw Error('invalid profile selector');
     if(!Object.hasOwn(chosen.profiles,profileId))throw Error('unknown profile selector; available profiles: ' + Object.keys(chosen.profiles).join(', '));
     chosen.active = profileId;
   }
   let catalogModel;
-  if(op !== 'uninstall') {
+  if(chosen) {
     const profile = chosen.profiles[chosen.active];
     const credential = profile.credential;
     if(profile.compatibleModel)catalogModel = {id: profile.model, ...profile.compatibleModel, api: profile.api, baseUrl: profile.endpoint};
     const resolved = credentialPath(credential);
     // Commands defer plaintext credential access to Pi's native authentication owner.
-    if(requireKey) {
+    if(requireKey && !setup) {
       if(!fs.existsSync(resolved))throw Error('credential file missing: configure the private credential directory and provide the selected profile key');
       if(!fs.statSync(resolved).isFile())throw Error('credential reference must be a regular file');
       fs.accessSync(resolved, fs.constants.R_OK);
     }
-    if(cli)catalogModel = await verifyCatalog(chosen, cli, expected);
   }
+  if(cli && op !== 'uninstall')catalogModel = await verifyCatalog(chosen, cli, expected);
   const lock = path.join(dir, '.agents-sot.lock');
   if(op !== 'validate') {
     fs.mkdirSync(dir, {recursive: true});
@@ -187,6 +191,10 @@ export async function configure({op, dir, root, secretRoot = path.join(root, "se
     for(const value of Object.values(state.managed ?? {}))if(!object(value))throw Error('managed entries must be objects');
     if(state.root && path.resolve(state.root) !== root)throw Error('configuration belongs to another SOT');
     const old = state.managed ?? {};
+    if(op !== 'uninstall' && !chosen) {
+      if(Object.values(old).some(entries => Object.keys(entries).length))throw Error('existing managed connection requires a configured profile; refusing to clear it during setup');
+      return {profile: null, provider: null, model: null, thinking: null};
+    }
     const modelProviders = models.providers ?? {};
     for(const [id, value] of Object.entries(old.auth ?? {})) {
       if(!equal(auth[id], value))throw Error('managed authentication changed; refusing drift for ' + id);
@@ -234,13 +242,13 @@ export async function configure({op, dir, root, secretRoot = path.join(root, "se
 }
 if(process.argv[1] === new URL(import.meta.url).pathname || process.argv[1]?.replaceAll('\\', '/').endsWith('/configure.js')) {
   const args=process.argv.slice(2); const localMode=args.at(-1)==='--local'; if(localMode)args.pop();
+  const setup=args.at(-1)==='--setup'; if(setup)args.pop();
   const [op, dir, root, cli, expected, profileId] = args;
   try {
     const input=localMode ? JSON.parse(fs.readFileSync(0,'utf8')) : {};
     if(localMode && (typeof input.root!=='string' || typeof input.secretRoot!=='string' || typeof input.configured!=='boolean'))throw Error('local configuration reader unavailable');
-    if(localMode && !input.configured && op!=='uninstall')throw Error('Pi is unconfigured; add a private Pi profile before selecting this integration');
-    if(op==='schema') {resolveProfiles(input.profiles);process.exit(0);}
-    const result = await configure({op: op === 'resolve' ? 'validate' : op, dir, root, cli, expected, profileId,
+    if(op==='schema') {resolveProfiles(input.profiles, setup);process.exit(0);}
+    const result = await configure({op: op === 'resolve' ? 'validate' : op, dir, root, cli, expected, profileId, setup,
       ...(localMode ? {root:input.root,secretRoot:input.secretRoot,profiles:input.profiles} : {}), requireKey: op !== 'uninstall'});
     // Selection is returned from the same snapshot that was validated, and projected for install.
     if(op === 'resolve' || op === 'install')process.stdout.write([result.profile, result.provider, result.model, result.thinking].join('\t') + '\n');

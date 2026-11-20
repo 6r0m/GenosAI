@@ -103,21 +103,22 @@ class ReleaseHooks(unittest.TestCase):
             release.check(self.root)
 
     @unittest.skipUnless(os.name=='posix','shell preflight test')
-    def test_unconfigured_pi_refuses_before_node_lookup_or_home_writes(self):
+    def test_missing_node_refuses_unconfigured_pi_setup_without_home_writes(self):
         home=self.base/'home';home.mkdir()
         script=r"""
 source "$1"
 AI_ROOT="$2"
 operation=install
+platforms=host
+runtime=0
 PI_NODE_REL=missing-node
-command() { printf 'unexpected Node lookup\n' >&2; return 1; }
+command() { return 1; }
 pi_preflight
 """
         result=subprocess.run([BASH,'-c',script,'fixture',str(self.root/'agents/providers/pi/lifecycle.sh'),str(self.root/'agents')],
                               env=self.env,capture_output=True,text=True)
         self.assertNotEqual(result.returncode,0)
-        self.assertIn('unconfigured',result.stderr)
-        self.assertNotIn('Node lookup',result.stderr)
+        self.assertIn('install Linux Node',result.stderr)
         self.assertEqual(list(home.iterdir()),[])
 
     @unittest.skipUnless(shutil.which('gitleaks'),'requires pinned Gitleaks')

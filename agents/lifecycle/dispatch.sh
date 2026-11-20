@@ -67,7 +67,7 @@ shared_search() {
   else
     native_target="$(wslpath -w "$target")"
     expected="--ignore-file=$(wslpath -w "$AGENT_IGNORE_SOT")"
-    current="$(cd "$native_cwd" && powershell.exe -NoProfile -Command "[Environment]::GetEnvironmentVariable('RIPGREP_CONFIG_PATH','User')" | tr -d '\r')"
+    current="$(cd "$native_cwd" && powershell.exe -NoProfile -Command "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding(\$false); [Environment]::GetEnvironmentVariable('RIPGREP_CONFIG_PATH','User')" | tr -d '\r')"
   fi
   if [[ "$operation" == install ]]; then
     if [[ -L "$target" ]] || { [[ -e "$target" ]] && ! search_config_matches "$target" "$expected"; }; then
@@ -158,7 +158,7 @@ for id in "${PROVIDERS[@]}"; do
 done
 if [[ "${#ELEVATED_QUEUE[@]}" -gt 0 ]]; then
   BATCH="$WIN_HOME/AppData/Local/Temp/agents-sot-links.cmd"
-  { echo '@echo off'; printf '%s || exit /b 1\n' "${ELEVATED_QUEUE[@]}"; } > "$BATCH"
+  { printf '@echo off\r\nchcp 65001 >nul || exit /b 1\r\n'; printf '%s || exit /b 1\r\n' "${ELEVATED_QUEUE[@]}"; } > "$BATCH"
   echo 'Queued NT links require the existing elevated link batch; re-run to verify.'
   printf 'Run from an elevated Windows terminal: %s\n' "$(wslpath -w "$BATCH")"
   FAILED=1

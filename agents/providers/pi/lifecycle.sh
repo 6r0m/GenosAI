@@ -1,11 +1,29 @@
-# Validate the selected connection before any provider links are changed.
+# Validate setup prerequisites and any configured connection before provider links change.
 pi_preflight() {
   [[ "$operation" == install ]] || return 0
-  local input config_node="$HOME/$PI_NODE_REL"
-  input="$(python3 "$AI_ROOT/config.py" pi --require-configured)" || return 1
-  [[ -x "$config_node" ]] || config_node="$(command -v node || true)"
-  [[ -x "$config_node" ]] || { echo 'error: Node required for Pi configuration preflight' >&2; return 1; }
-  "$config_node" "$AI_ROOT/providers/pi/runtime/configure.js" schema --local <<<"$input"
+  local input config_node="$HOME/$PI_NODE_REL" native_profile
+  input="$(python3 "$AI_ROOT/config.py" pi)" || return 1
+  if [[ "$platforms" != windows ]]; then
+    [[ -x "$config_node" ]] || config_node="$(command -v node || true)"
+    [[ -x "$config_node" ]] || { echo 'error: install Linux Node 22.19+ and npm in your user environment, then retry the Pi install' >&2; return 1; }
+    if [[ "$runtime" == 1 && ! -x "$(dirname "$config_node")/npm" ]] && ! command -v npm >/dev/null; then
+      echo 'error: npm required for selected Linux Pi runtime acquisition' >&2; return 1
+    fi
+  else
+    config_node="/mnt/c/$PI_WIN_NODE_REL"
+  fi
+  if [[ "$platforms" != host ]]; then
+    native_profile="$(windows_profile || true)"
+    if [[ -n "$native_profile" ]]; then
+      [[ -x "/mnt/c/$PI_WIN_NODE_REL" && -x "/mnt/c/$PI_WIN_SHELL_REL" ]] || {
+        echo 'error: install native Windows Node 22.19+ and Git Bash before selecting Windows Pi' >&2; return 1;
+      }
+    fi
+  fi
+  [[ -x "$config_node" ]] || { echo 'error: native Windows Node required for Pi configuration preflight' >&2; return 1; }
+  local config_script="$AI_ROOT/providers/pi/runtime/configure.js"
+  [[ "$platforms" != windows ]] || config_script="$(wslpath -w "$config_script")"
+  "$config_node" "$config_script" schema --setup --local <<<"$input"
 }
 
 pi_runtime() {
@@ -89,7 +107,7 @@ pi() {
     # projections only; the new CLI meets the exact pin after npm ci. Without acquisition the installed
     # runtime must already match the pin.
     if [[ "$runtime" != 1 && "$available" == 1 ]]; then runtime_args=("$native_cli" "$version"); fi
-    "$config_node" "$config_script" validate "${config_args[@]}" "${runtime_args[@]}" --local <<<"$local_json" || return 1
+    "$config_node" "$config_script" validate "${config_args[@]}" "${runtime_args[@]}" --setup --local <<<"$local_json" || return 1
     if [[ "$runtime" == 1 ]]; then
       local fresh_runtime=0
       [[ -f "$owner" ]] || fresh_runtime=1
@@ -101,7 +119,7 @@ pi() {
         return 1
       fi
       printf '%s\n' "$AI_ROOT" > "$owner"
-      if ! "$task_node" "$config_script" validate "${config_args[@]}" "$native_cli" "$version" --local <<<"$local_json"; then
+      if ! "$task_node" "$config_script" validate "${config_args[@]}" "$native_cli" "$version" --setup --local <<<"$local_json"; then
         if [[ "$fresh_runtime" == 1 ]]; then
           echo "Pi preflight failed on $platform; removing the newly owned runtime" >&2
           pi_runtime uninstall "$platform" "$task_node" "$task_prefix" || { echo 'error: newly owned runtime cleanup failed' >&2; return 1; }
@@ -115,7 +133,7 @@ pi() {
     generic "$id" "$platform" "$home"
     if [[ "$available" == 1 ]]; then
       PI_CODING_AGENT_DIR="$task_agent" PI_TELEMETRY="$PI_TELEMETRY_VALUE" "$task_node" "$native_cli" install "$agent_root"
-      "$task_node" "$config_script" install "${config_args[@]}" "${runtime_args[@]}" --local <<<"$local_json" >/dev/null
+      "$task_node" "$config_script" install "${config_args[@]}" "${runtime_args[@]}" --setup --local <<<"$local_json" >/dev/null
       mkdir -p "$(dirname "$task_launcher")"
       if [[ -e "$task_launcher" ]] && ! grep -qF 'agents SOT launcher' "$task_launcher"; then echo 'error: foreign Pi launcher left alone' >&2; return 1; fi
       if [[ "$platform" == wsl ]]; then

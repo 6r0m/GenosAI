@@ -82,4 +82,5 @@ Both present, invalid comments, trailing commas and duplicate keys refuse. `make
 input byte for byte and seeds JSONC only when neither exists. The bundled, pinned comment parser needs
 no package installation; native projections retain their native format. The commented example stays disabled; no
 real connection or permissive operator preference belongs in tracked defaults. `make check` validates
-configured profile structure; selected Pi install also checks credentials and the installed native catalog.
+configured profile structure; selected Pi install validates configured profiles against the installed
+native catalog. Installation permits absent credentials; session startup requires a readable key.

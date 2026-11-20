@@ -14,8 +14,8 @@ BASH = shutil.which("bash")
 class WindowsProfile(unittest.TestCase):
     def profile(self, value, code="0"):
         env = dict(os.environ, FIXTURE_PROFILE=value, FIXTURE_EXIT=code)
-        # Functions avoid falling through to a real cmd.exe on noexec checkouts.
-        script = ('cmd.exe() { printf "%s\\r\\n" "$FIXTURE_PROFILE"; return "$FIXTURE_EXIT"; }; '
+        # Functions avoid falling through to a real PowerShell on noexec checkouts.
+        script = ('powershell.exe() { [[ "$*" == *UTF8Encoding* ]] || return 9; printf "%s\\r\\n" "$FIXTURE_PROFILE"; return "$FIXTURE_EXIT"; }; '
                   'timeout() { shift; "$@"; }; source "$1"; windows_profile')
         with tempfile.TemporaryDirectory(prefix="platform-paths-") as temporary:
             probe = Path(temporary) / "probe.sh"
@@ -27,6 +27,11 @@ class WindowsProfile(unittest.TestCase):
         result = self.profile("C:\\Users\\Sample Person")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "C:\\Users\\Sample Person\n")
+
+    def test_unicode_profile_uses_explicit_utf8_output(self):
+        result = self.profile("C:\\Users\\Тестовый пользователь")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "C:\\Users\\Тестовый пользователь\n")
 
     def test_missing_unexpanded_or_failed_result_is_not_a_profile(self):
         for value, code in (("", "0"), ("%USERPROFILE%", "0"), ("C:\\Users\\Sample Person", "7")):
