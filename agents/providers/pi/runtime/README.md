@@ -29,7 +29,9 @@ pi-sot --version
 Use `PLATFORM=host` for Linux/WSL only. Both-platform installation requires Linux Node/npm and native
 Windows Node/Git Bash. Missing prerequisites refuse with guidance; installation never installs system Node.
 Windows instruction file links need Developer Mode or the installer's explicitly reported elevated batch.
-An unconfigured installation registers the local package without creating auth/model projections.
+An unconfigured installation registers the local package without creating managed auth/model
+projections. The native CLI may initialize an empty `auth.json`; that empty store contains no credential
+reference or provider selection.
 An existing managed connection cannot be cleared by replacing its profile with disabled defaults.
 
 Before starting a model session, copy [the connection example](profiles.example.json) into the private root `pi` object,

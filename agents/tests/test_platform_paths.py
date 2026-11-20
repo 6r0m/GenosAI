@@ -1,5 +1,7 @@
-"""Native profile discovery preserves argument boundaries and refuses unknown results."""
+"""Windows profile, launcher encoding and selected-home transport boundaries."""
 import os
+import sys
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -32,6 +34,44 @@ class WindowsProfile(unittest.TestCase):
         result = self.profile("C:\\Users\\Тестовый пользователь")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "C:\\Users\\Тестовый пользователь\n")
+
+    def test_pi_launcher_preserves_unicode_with_utf8_and_crlf(self):
+        writer = HELPER.parents[1] / 'providers/pi/lifecycle.sh'
+        with tempfile.TemporaryDirectory(prefix='pi-launcher-') as temporary:
+            target = Path(temporary) / 'pi-sot.cmd'
+            shell = r'C:\Program Files\Git\bin\bash.exe'
+            launch = r'C:\Test User\SOT Юникод\launch.sh'
+            result = subprocess.run([BASH, '-c',
+                                     'source "$1"; pi_write_windows_launcher "$2" "$3" "$4"',
+                                     'fixture', writer.as_posix(), target.as_posix(), shell, launch],
+                                    capture_output=True, text=True, timeout=20)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            raw = target.read_bytes()
+            self.assertNotIn(b'\n', raw.replace(b'\r\n', b''))
+            lines = raw.decode('utf-8').splitlines()
+            self.assertEqual(lines[2], 'chcp 65001 >nul || exit /b 1')
+            self.assertEqual(lines[3], '"' + shell + '" "' + launch + '" %*')
+
+    def test_pi_package_forwards_owned_windows_environment_without_changing_parent(self):
+        writer = HELPER.parents[1] / 'providers/pi/lifecycle.sh'
+        original = 'FOREIGN/p:PI_CODING_AGENT_DIR/p:PI_TELEMETRY/u'
+        with tempfile.TemporaryDirectory(prefix='pi-native-env-') as temporary:
+            capture = Path(temporary) / 'capture.py'
+            capture.write_text("import os,sys,json; print(json.dumps({k:os.environ.get(k) for k in ('WSLENV','PI_CODING_AGENT_DIR','PI_TELEMETRY')}))", encoding='utf-8')
+            for platform in ('wsl', 'windows'):
+                env = dict(os.environ, WSLENV=original)
+                script = 'source "$1"; PI_TELEMETRY_VALUE=0; pi_native_package "$2" "$3" "$4" "C:/Synthetic Home/.pi/agent" install "C:/Synthetic Source/agents"; printf "%s\\n" "$WSLENV"'
+                result = subprocess.run([BASH, '-c', script, 'fixture', writer.as_posix(),
+                                         platform, sys.executable, capture.as_posix()],
+                                        env=env, capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                lines = result.stdout.splitlines()
+                data = json.loads(lines[0])
+                self.assertEqual(data['PI_CODING_AGENT_DIR'], 'C:/Synthetic Home/.pi/agent')
+                self.assertEqual(data['PI_TELEMETRY'], '0')
+                expected = 'FOREIGN/p:PI_CODING_AGENT_DIR:PI_TELEMETRY' if platform == 'windows' else original
+                self.assertEqual(data['WSLENV'], expected)
+                self.assertEqual(lines[1], original)
 
     def test_missing_unexpanded_or_failed_result_is_not_a_profile(self):
         for value, code in (("", "0"), ("%USERPROFILE%", "0"), ("C:\\Users\\Sample Person", "7")):

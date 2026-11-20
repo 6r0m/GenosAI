@@ -9,7 +9,7 @@ import {configure} from '../../../providers/pi/runtime/configure.js';
 const scratch=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../../tmp');
 const one=(provider='deepseek',model='a',credential='secrets/a.key')=>({active:'first',profiles:{first:{provider,model,credential}}});
 function fixture(t) {
- const root=fs.mkdtempSync(path.join(scratch,'pi-profile-'));
+ const root=fs.mkdtempSync(path.join(scratch,'pi-profile Юникод-'));
  fs.mkdirSync(path.join(root,'secrets'));for(const id of ['a','b'])fs.writeFileSync(path.join(root,'secrets',id+'.key'),'synthetic');
  const dir=path.join(root,'agent');fs.mkdirSync(dir);
  const opts={op:'install',root,dir,profiles:one()};
@@ -243,9 +243,14 @@ test('SOT-only changes select native managed launch on each platform',t=>{
   assert.equal(converted.status,0,converted.stderr);
   const env={...baseEnv,HOME:converted.stdout.trim()};
   const cmdShim=path.join(home,'pi-sot.cmd'),bashShim=path.join(home,'pi-sot');
-  fs.writeFileSync(cmdShim,'@echo off\r\nrem agents SOT launcher\r\n"'+resolveShell()+'" "'+path.join(runtime,'launch.sh')+'" %*\r\n');
+  const writer=fileURLToPath(new URL('../../../providers/pi/lifecycle.sh',import.meta.url));
+  const generated=spawnSync(resolveShell(),['-c','source "$(cygpath -u "$1")"; pi_write_windows_launcher "$(cygpath -u "$2")" "$3" "$4"',
+   'fixture',writer,cmdShim,resolveShell(),path.join(runtime,'launch.sh')],{env,encoding:'utf8'});
+  assert.equal(generated.status,0,generated.stderr);
+  const cmdEntry=path.join(home,'codepage-entry.cmd');
+  fs.writeFileSync(cmdEntry,'@echo off\r\nchcp 866 >nul || exit /b 1\r\ncall "%~dp0pi-sot.cmd" %*\r\n');
   fs.writeFileSync(bashShim,'#!/usr/bin/env bash\n# agents SOT launcher\nexec bash "'+path.join(runtime,'launch.sh').replaceAll('\\','/')+'" "$@"\n');
-  for(const [command,args] of [['cmd.exe',['/d','/c',cmdShim,'--profile','alternate','--version']],[resolveShell(),[bashShim,'--profile','alternate','--version']]]) {
+  for(const [command,args] of [['cmd.exe',['/d','/c',cmdEntry,'--profile','alternate','--version']],[resolveShell(),[bashShim,'--profile','alternate','--version']]]) {
    result=spawnSync(command,args,{env,encoding:'utf8'});assert.equal(result.status,0,result.stderr);
    assert.deepEqual(JSON.parse(fs.readFileSync(record)),['--provider',alternate.provider,'--model',alternate.model,'--thinking','high','--version']);
    assert.equal(fs.readFileSync(profileFile,'utf8'),policyBefore);

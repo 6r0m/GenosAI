@@ -3,6 +3,7 @@
 ## Contents
 
 - Verification entrypoints
+- Fresh installation acceptance
 - Transport acceptance
 - Direct-provider acceptance
 
@@ -37,6 +38,38 @@ For the installed loader, use each platform's configured native Node:
 ```bash
 node agents/tests/providers/pi/native.js <installed-package-dist/index.js> <repo-root> <native-agent-directory>
 ```
+
+## Fresh installation acceptance
+
+Use an independently extracted public source with disabled defaults and no credentials. Run in a
+fresh user environment, separate from active Pi sessions. Linux can use a disposable `HOME`; Windows
+profile discovery is independent of WSL `HOME`, so use an isolated Windows user or explicitly isolate
+the selected native home in the test harness. Forward native operations to real Windows tools.
+Profile redirection alone does not prove discovery; verify the real Unicode profile separately.
+
+```bash
+make init
+make check
+make test
+make public-check
+make install PROVIDER=pi PLATFORM=host RUNTIME=1
+pi-sot --version
+pi-sot --help
+pi-sot
+make uninstall PROVIDER=pi PLATFORM=host RUNTIME=1
+```
+
+The bare launch must refuse as unconfigured. Before removal, verify no `models.json` or managed
+connection state exists; any native `auth.json` must be empty. Plant unrelated sentinel files in the
+isolated native agent directory and runtime prefix, then verify removal preserves them and removes
+only owned links, launcher and runtime artifacts. Native CLI initialization of an empty auth store is
+not a managed credential projection.
+
+Repeat the selected lifecycle with `PLATFORM=both` on WSL/Windows using actual Node, npm and Pi.
+Verify PowerShell and Git Bash launchers, native NT instruction links and the installed SDK loader.
+[The lifecycle owner](../../../lifecycle/README.md) defines the elevated-link procedure. Capture
+installation, verification and removal output under ignored `tmp/`; sanitize machine paths before
+sharing. No provider request is required for this acceptance.
 
 ## Transport acceptance
 

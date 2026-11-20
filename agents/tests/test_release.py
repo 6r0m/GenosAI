@@ -183,9 +183,13 @@ class Distribution(unittest.TestCase):
         for file in release.source_files(AI):
             target=source/file.relative_to(AI);target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(file,target)
         home=self.base/'windows-home';home.mkdir();binary=self.base/'bin';binary.mkdir()
-        scripts={'cmd.exe':'printf "%s\\n" "C:/Fixture"',
-                 'wslpath':'if [ "$1" = -u ]; then printf "%s\\n" "$FIXTURE_HOME"; else printf "%s\\n" "$2"; fi',
-                 'powershell.exe':'printf "%s\\n" "C:/foreign/ripgreprc"'}
+        scripts={'cmd.exe':'exit 99',
+                 'wslpath':'if [ "$1" = -u ] && [ "$2" = "C:/Fixture" ]; then printf "%s\\n" "$FIXTURE_HOME"; elif [ "$1" = -w ]; then printf "%s\\n" "$2"; else exit 98; fi',
+                 'powershell.exe':r'''case "$*" in
+                   *GetFolderPath*) printf '%s\n' 'C:/Fixture' ;;
+                   *GetEnvironmentVariable*) printf '%s\n' 'C:/foreign/ripgreprc' ;;
+                   *) exit 97 ;;
+                 esac'''}
         for name,body in scripts.items():
             file=binary/name;file.write_text('#!/bin/bash\n'+body+'\n');file.chmod(0o700)
         result=subprocess.run(['bash',str(source/'agents/scripts/install.sh'),'--platform','windows'],env=dict(os.environ,HOME=str(home),FIXTURE_HOME=str(home),PATH=str(binary)+os.pathsep+ST.POSIX_TEST_PATH,TMPDIR=str(self.base)),capture_output=True,text=True)

@@ -54,6 +54,30 @@ pi_runtime() {
   fi
 }
 
+pi_native_package() {
+  local platform="$1" node="$2" cli="$3" agent="$4"
+  shift 4
+  local forwarding="${WSLENV-}" entry
+  if [[ "$platform" == windows ]]; then
+    local -a entries
+    IFS=: read -r -a entries <<< "$forwarding"
+    forwarding=''
+    for entry in "${entries[@]}"; do
+      case "${entry%%/*}" in
+        ''|PI_CODING_AGENT_DIR|PI_TELEMETRY) ;;
+        *) forwarding+="${forwarding:+:}$entry" ;;
+      esac
+    done
+    # The agent directory is already a native Windows path, so no /p conversion applies.
+    forwarding+="${forwarding:+:}PI_CODING_AGENT_DIR:PI_TELEMETRY"
+  fi
+  WSLENV="$forwarding" PI_CODING_AGENT_DIR="$agent" PI_TELEMETRY="$PI_TELEMETRY_VALUE" "$node" "$cli" "$@"
+}
+
+pi_write_windows_launcher() {
+  printf '@echo off\r\nrem agents SOT launcher\r\nchcp 65001 >nul || exit /b 1\r\n"%s" "%s" %%*\r\n' "$2" "$3" > "$1"
+}
+
 pi() {
   local id="$1" platform="$2" home="$3" task_node task_cli task_prefix task_launcher task_repo task_agent
   local owner task_telemetry_owner="$home/${PROVIDER_DIR[$id]}/.agents-sot-telemetry"
@@ -132,14 +156,14 @@ pi() {
     fi
     generic "$id" "$platform" "$home"
     if [[ "$available" == 1 ]]; then
-      PI_CODING_AGENT_DIR="$task_agent" PI_TELEMETRY="$PI_TELEMETRY_VALUE" "$task_node" "$native_cli" install "$agent_root"
+      pi_native_package "$platform" "$task_node" "$native_cli" "$task_agent" install "$agent_root"
       "$task_node" "$config_script" install "${config_args[@]}" "${runtime_args[@]}" --setup --local <<<"$local_json" >/dev/null
       mkdir -p "$(dirname "$task_launcher")"
       if [[ -e "$task_launcher" ]] && ! grep -qF 'agents SOT launcher' "$task_launcher"; then echo 'error: foreign Pi launcher left alone' >&2; return 1; fi
       if [[ "$platform" == wsl ]]; then
         printf '#!/usr/bin/env bash\n# agents SOT launcher\nexec /bin/bash %q "$@"\n' "$AI_ROOT/providers/pi/runtime/launch.sh" > "$task_launcher"; chmod +x "$task_launcher"
       else
-        printf '@echo off\r\nrem agents SOT launcher\r\n"%s" "%s" %%*\r\n' "$(wslpath -w "/mnt/c/$PI_WIN_SHELL_REL")" "$(wslpath -w "$AI_ROOT/providers/pi/runtime/launch.sh")" > "$task_launcher"
+        pi_write_windows_launcher "$task_launcher" "$(wslpath -w "/mnt/c/$PI_WIN_SHELL_REL")" "$(wslpath -w "$AI_ROOT/providers/pi/runtime/launch.sh")"
         local bash_launcher="$home/$PI_WIN_BASH_LAUNCHER_REL"
         if [[ -e "$bash_launcher" ]] && ! grep -qF 'agents SOT launcher' "$bash_launcher"; then echo 'error: foreign Git Bash launcher left alone' >&2; return 1; fi
         printf '#!/usr/bin/env bash\n# agents SOT launcher\nexec bash %q "$@"\n' "$(wslpath -w "$AI_ROOT/providers/pi/runtime/launch.sh")" > "$bash_launcher"
@@ -151,7 +175,7 @@ pi() {
     else echo "skipped Pi registration on $platform: runtime absent; run install.sh --provider $id --runtime"; fi
   else
     if [[ "$available" == 1 ]]; then
-      PI_CODING_AGENT_DIR="$task_agent" PI_TELEMETRY="$PI_TELEMETRY_VALUE" "$task_node" "$native_cli" remove "$agent_root"
+      pi_native_package "$platform" "$task_node" "$native_cli" "$task_agent" remove "$agent_root"
       local config_script="$AI_ROOT/providers/pi/runtime/configure.js"; [[ "$platform" != windows ]] || config_script="$(wslpath -w "$config_script")"
       "$task_node" "$config_script" uninstall "$task_agent" "$task_repo" --local <<<"$local_json"
     else
