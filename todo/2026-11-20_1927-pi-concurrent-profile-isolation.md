@@ -78,6 +78,9 @@ No implementation of the separate optional-plugin/image-budget plan.
 | Installed Pi 1.5.2, `dist/config.js`, `getAgentDir()` / `getAuthPath()` / `getModelsPath()` | `PI_CODING_AGENT_DIR` is the supported native boundary for independent configuration roots. |
 | Installed Pi 1.5.2, `dist/core/settings-manager.js`, `FileSettingsStorage` | Settings writes lock the lexical settings path with `realpath: false`. Sharing one writable settings file through different profile symlinks would not give a common lock. |
 | [Permission gate](../agents/providers/pi/permissions/gate.py), `secret()` | Recognizes `.pi/agent/auth.json`; a synthetic `.pi/agent/profiles/alpha/auth.json` is currently not classified as protected. New paths need coverage before use. |
+| [Projector CLI](../agents/providers/pi/runtime/configure.js), [launcher](../agents/providers/pi/runtime/launch.sh) and [acceptance interface](../agents/tests/providers/pi/run.sh) | Current output ends with optional `thinking`. Bash collapses adjacent tab separators: appending a required directory after an empty thinking field would shift that directory into `thinking`. This is a proposed-contract hazard, not a defect in today's four-field output. |
+| [Link removal](../agents/lifecycle/platform-links.sh), `remove_link()` | Accepts only targets below `AI_ROOT`. A shared-session target in the native base is outside that ownership domain; its link requires an exact-target check without widening the shared helper. |
+| [Launcher](../agents/providers/pi/runtime/launch.sh), `list` branch | An explicit selector is validated, but native `list` still receives the base agent directory. New per-profile package registrations require profile-aware inspection. |
 | [Runtime documentation](../agents/providers/pi/runtime/README.md); [verification documentation](../agents/tests/providers/pi/README.md) | Explicitly document sequential sessions and authentication loss. This is an existing GenosAI limitation, not a native Pi requirement. |
 
 Upstream [model selection](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)
@@ -109,6 +112,10 @@ sequence in the screenshot was not captured. The diagnostic proves a possible sa
 credential/endpoint mismatch, not a real credential leak. Native-directory auth isolation is
 demonstrated; the proposed complete managed CLI/resource/session lifecycle is not implemented or
 proven yet. Existing green tests encode the old limitation and must change with the contract.
+
+The review-round diagnostics below also show why forwarding native `list` alone cannot promise
+an entirely non-mutating inspection route: Pi 1.5.2 creates a missing agent directory while
+acquiring its trust-store lock. Handle an uninitialized profile before native dispatch.
 
 Initial unrelated modifications in `agents/tests/test_release.py`, `docs/preparation.md` and
 `tools/release.py` were left untouched. They were no longer dirty at the final pre-write check;
@@ -161,6 +168,58 @@ selected with `PI_CODING_AGENT_DIR`. Extend the existing Pi owner; keep one inst
    is never garbage collection. Removal recognizes owned projections even for profiles no
    longer in current config and preserves native preferences/history/foreign files.
 
+### Selection output contract
+
+The projector owns the shell record. Put the required native directory before the optional
+thinking level: `profile`, `provider`, `model`, `agentDir`, `thinking`, tab-separated with
+`thinking` last. Update `launch.sh`, the acceptance `run.sh` and their test stubs together.
+Both consumers use `read -r` and quoted path arguments, require every mandatory field and
+preserve an omitted thinking level; they must never emit `--thinking <agent-directory>`.
+Test omitted/present thinking with Windows paths containing spaces and backslashes through
+both entrypoints. Preserve the single-snapshot guarantee; no second configuration read to
+recover a directory or effort that parsing lost.
+
+### Shared-session link ownership
+
+The Pi runtime owner supplies the exact expected base-session target alongside the selected
+profile path. Create/remove session links through the existing platform mechanics with a
+Pi-specific ownership check. Require both the owned profile location and that exact target;
+do not weaken `remove_link()`'s `AI_ROOT` rule for other resources. An absent link is a no-op;
+a foreign/tampered link, directory or escaping target is preserved and reported/refused.
+Remove only the validated POSIX link or Windows junction with unlink/non-recursive `rmdir`.
+Never recurse into it or remove the target. Native junctions need explicit native link-type
+and target verification; a generic directory test is not ownership proof.
+
+### Read-only package inspection
+
+| Invocation/state | Resolution and behavior |
+|---|---|
+| `pi-sot list`, configured | Resolve `active` from one snapshot and inspect that existing profile directory. |
+| `pi-sot --profile A list` | Resolve A and inspect A's existing directory, regardless of `active`. |
+| Either form, selected profile uninitialized | Report that the profile is not initialized and exit nonzero before native dispatch. Create no directory, registration, auth projection or lock; never fall back to base/another profile. |
+| `pi-sot list`, exact disabled configuration | Preserve base-directory inspection without selecting or provisioning a connection. If that base is absent, report uninitialized state before native dispatch. |
+| Invalid/unknown explicit selector | Refuse before native dispatch or writes, including with disabled configuration. |
+
+Use the configuration owner's metadata-only resolution path for inspection; it validates the
+selector/schema and derives the same directory as launch without requiring/resolving credentials
+or calling the projector's install operation. Missing selected credential files do not prevent
+package inspection. Forward `list` as native argv[0], and test different package sentinels in
+base/A/B to prove which state is inspected. Ordinary initialized inspection must preserve state;
+native temporary read locks in an existing directory are allowed and must leave no artifacts.
+Explicitly requested native project-trust changes retain their existing semantics and must not
+be described as read-only. No new package-list implementation or profile registry is needed.
+
+### Resume and connection identity
+
+Sharing history exposes conversations; it does not bind them to a GenosAI profile. Native Pi's
+`ModelChangeEntry` records provider/model, not this wrapper's profile ID, credential reference
+or endpoint. The managed launcher passes the selected profile's provider/model explicitly;
+native CLI model selection takes precedence over restoring a saved model when supplied.
+Resuming an A conversation through `--profile B` therefore uses B's configured connection
+for the selected model, including when A/B share a provider/model. Native CLI overrides remain
+session-local. Restoring A's route requires selecting A; no transcript-to-profile index is added.
+Test that flow against synthetic distinct endpoint/key pairs while preserving the history.
+
 ### Premise / KISS gate
 
 The need is independent live connections. Pi already owns per-agent configuration and sessions;
@@ -194,6 +253,7 @@ snapshot lifecycle; changing a live profile's own definition requires restarting
    resolves command references. No raw keys in argv, projections, logs or copied native stores.
 4. Preserve one-snapshot selection, explicit leading selector rules, native argument forwarding,
    installed-version refusal, selected-model pinning and no mutation of local source input.
+   Required selection fields precede optional thinking in the shell record.
 5. Inactive keys remain optional. Preserve disabled setup and the existing non-projecting
    validate/help/version/list paths. Invalid selector/capability/key refusals must not create a
    profile or modify protected state; an explicitly selected version probe retains its current
@@ -203,6 +263,11 @@ snapshot lifecycle; changing a live profile's own definition requires restarting
    Individual atomic file replacements are not a multi-file transaction.
 7. Conversation history remains discoverable and unchanged; do not migrate, duplicate or delete
    it. Preserve explicit native session-directory overrides. A3 bounds live reconfiguration.
+   Resuming shared history does not restore a profile's key/endpoint; the selected profile
+   supplies the connection. Session-link removal verifies the exact expected target.
+8. Ordinary `list` inspects the selected profile without provisioning it or reading its key;
+   uninitialized profiles refuse before native dispatch. Disabled base inspection remains
+   available. Explicit native trust mutations are outside the read-only guarantee.
 
 ## Implementation tasks
 
@@ -210,12 +275,15 @@ snapshot lifecycle; changing a live profile's own definition requires restarting
   auth-loss behavior as an explicit negative control, not the expected managed outcome.
 - [ ] Extend `configure.js` to own profile-path resolution and selected native projection using
   one parsed snapshot. Return the resolved directory in its result/CLI contract; update all
-  consumers together, including [the acceptance interface](../agents/tests/providers/pi/run.sh).
+  consumers together, including [the acceptance interface](../agents/tests/providers/pi/run.sh),
+  using the selection-output contract above.
 - [ ] Extend lifecycle provisioning/removal for per-profile canonical instructions, native local
   package registration and shared-session links. Preflight before writes; bootstrap selected
   profiles idempotently, using existing platform machinery without a parallel registry.
+  Add exact-target session-link ownership without widening the generic removal boundary.
 - [ ] Update `launch.sh` to dispatch the pinned native CLI with that returned directory. Preserve
-  source/config immutability, startup effort, nonlaunch inspection and all forwarding semantics.
+  source/config immutability, startup effort and forwarding semantics; implement the explicit
+  configured/disabled/uninitialized `list` cases above through metadata-only resolution.
 - [ ] Extend `gate.py` and its native startup probe/tests for the new owned auth paths before
   enabling those paths. Cover sibling profiles and configurable native base paths.
 - [ ] Adapt `config.test.js`, `compatible.js`, `endpoint.js`, `catalog.js`, installed loader checks,
@@ -237,7 +305,10 @@ Use synthetic keys and loopback or injected transport. No real provider or paid 
 | Same provider/model, different keys/endpoints — permanent guard | Record A's synthetic key at A's endpoint, select B, repeat A, then request B. Today A can resolve B's key; assert endpoint/key pairs never cross. Check values in memory, never log auth headers. |
 | Two real managed CLI processes — acceptance in `endpoint.js` | Keep A alive behind a fixture barrier, start B, then release A's next generation. Current shared projections break A. Assert both serialized requests and loaded directories, not merely file counts. Bound and verify child cleanup. |
 | Refusal/no mutation — permanent guards | Missing/invalid B, foreign target, escaping link and provisioning failure leave A, source input and history byte-identical; no native dispatch or partial success. Existing coverage only observes shared-root files. |
-| Native resources and sessions — acceptance | Two profile roots load the package/guard and resume/list pre-existing shared history with working-directory filtering. Current launcher supplies no independent profile roots. Native settings remain separate, explicit session overrides work. |
+| Shell output — permanent guard in `config.test.js` | The proposed five-field record with directory after empty thinking misparses on WSL/Git Bash. Test the required-directory-before-optional-thinking contract through launcher and acceptance stubs, omitted/present effort and Windows spaces/backslashes; retain the wrong-order negative control. |
+| Profile package inspection — permanent guard in `config.test.js` | Today's explicit selector still dispatches base. Plant distinct base/A/B settings, verify implicit/explicit selection and argv[0], missing-key independence, uninitialized refusal, disabled inspection, invalid-selector refusal and no persistent new files/directories/locks. Do not call native `list` on a missing profile; that native negative control creates a directory. |
+| Native resources and sessions — acceptance | Two profile roots load the package/guard and resume/list pre-existing shared history with working-directory filtering. Also resume A's history through B and observe B's endpoint/key, including identical provider/model IDs. Native settings remain separate, explicit session overrides work. The flat-parent session override is a negative discovery control, not a replacement for the directory link. |
+| Session-link cleanup — permanent guards/native acceptance | Existing `remove_link()` intentionally retains a link outside `AI_ROOT`. Require exact-owned-target cleanup for POSIX symlinks and native junctions, absent-link idempotence, foreign/tampered target refusal and a byte-identical target/history sentinel after removal. Assert the generic helper's ownership boundary stays intact. |
 | Credential-path protection — permanent guard in `test_gate.py` | Nested active/sibling auth paths currently fail secret classification. Require denials through gated tools and recognized shell readers; include ordinary-document allow controls. |
 | Install, removal, legacy transition — acceptance/guards | Current installer provisions only the base root; no selected-profile bootstrap, retired-profile removal or owned-link transition contract exists. Prove repeatability and preservation of foreign/user data. |
 
@@ -273,7 +344,9 @@ necessary to prove this local-state defect. Check docs/relative links with exist
 ## Documentation plan
 
 - **Authoritative stable owner:** runtime README above; replace the sequential-session limitation
-  with native profile scope, A2–A3 consequences, shared-history behavior and transition procedure.
+  with native profile scope, A2–A3 consequences, shared-history/resume connection semantics,
+  package-inspection behavior and transition procedure. Do not claim this proposed behavior
+  in stable docs before implementation; the shell record's executable shape belongs in code.
 - **Permission owner:** [Pi permissions](../agents/providers/pi/permissions/README.md), only the
   new protected-path responsibility if explanation is needed; executable shapes stay in code.
 - **Verification owner:** [Pi verification](../agents/tests/providers/pi/README.md), replace the
@@ -299,6 +372,8 @@ do not repurpose or recursively delete the base directory. Uninstall discovers o
 including retired IDs, and removes only verified owned entries/links. It must never traverse a
 shared-session link during cleanup. Tampered ownership, partial native provisioning or foreign
 links refuse with actionable diagnostics; repair must not discard unknown state.
+Session links are a separate exact-target ownership case: absence is harmless, a mismatched
+target stays intact, and cleanup removes only the verified link/junction, never its history target.
 
 Rollback uses the prior source/lifecycle after finishing new-profile sessions and validating owned
 state. Keep sessions/native user files and original key references; no secret export or copying is
@@ -310,8 +385,10 @@ The same real managed route supports two live profiles with correct synthetic en
 pairs, for both different and identical provider/model IDs, on WSL and native Windows. Native
 negative controls still expose the old failure. Guards protect all new auth locations; required
 instructions/skills load; existing history, foreign settings and source input survive. Required
-checks pass with explicit platform gaps, stable docs agree, and task changes stay within the named
-owners. No claim about provider availability, billing or production rollout follows from this proof.
+checks cover omitted effort, profile-aware non-mutating inspection, exact-target link cleanup and
+resume connection identity on both platforms. Checks pass with explicit platform gaps, stable docs
+agree, and task changes stay within the named owners. No claim about provider availability,
+billing or production rollout follows from this proof.
 
 ## Review record
 
@@ -325,3 +402,23 @@ owners. No claim about provider availability, billing or production rollout foll
 - **Verification:** existing configuration suites and compatible acceptance passed on both platforms;
   the scratch diagnostic distinguished shared-root failures from native-directory auth isolation.
 - **Authority:** D1–D2 recorded; A1–A3 are proposals/assumptions, not operator approvals.
+
+### 2026-11-20 — Reviewer contract corrections
+
+- **Assessment:** accepted the three integration-contract findings and resume clarification.
+  They refine the existing proposal; no new architecture, dependency or service is needed.
+- **Qualification:** optional-field shifting is prospective; today's optional thinking field is
+  already last. Native `list` is not unconditionally non-mutating: an absent agent directory is
+  created while the native trust-store lock is acquired. The uninitialized-path refusal above
+  closes that gap without an additional provisioning path.
+- **Changes:** specified the output order and both consumers, exact-target session-link ownership,
+  selected-profile inspection cases, resume identity and corresponding regression controls.
+- **Verification:** WSL Bash and native Git Bash reproduced the bad-order shift and preserved
+  empty/present thinking with the proposed order and a Windows path containing spaces/backslashes.
+  A synthetic POSIX session link remained intact under the existing generic remover, confirming
+  its ownership mismatch. Native Pi 1.5.2 on WSL and Windows retained grouped session discovery
+  through the link, missed that session with an explicit flat parent override, recorded no profile/
+  endpoint/credential in model selection, and created an empty missing agent directory on `list`.
+  These fixtures used no real keys or provider requests; proposed managed behavior remains unimplemented.
+  Documentation conformance passed all 11 tests; diff whitespace and plan structure checks passed.
+- **Authority:** D1–D2 and A1–A3 unchanged. Reviewer text supplies evidence, not implementation approval.
