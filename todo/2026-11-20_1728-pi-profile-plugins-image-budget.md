@@ -105,6 +105,14 @@ ledger without demonstrated need, or promise to police arbitrary third-party pay
 - [Pi 1.5.2 CLI](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/docs/cli.md)
   documents repeated `--extension` and `--no-extensions`; the latter disables discovered and
   configured extensions. Selection must not inject it and accidentally remove the managed guard.
+  The current launcher also forwards operator-supplied native arguments unchanged, including
+  `-ne` / `--no-extensions` and `-e` / `--extension` sources. Explicit extensions can remain
+  active while the normally discovered mandatory adapter is disabled.
+- [Pi 1.5.2 tool-image normalization](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/src/utils/tool-result-images.ts)
+  keeps the original image when `processImage()` returns failure. Native resizing defaults in
+  [the resize core](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/src/utils/image-resize-core.ts)
+  are 2000 pixels per side and 4.5 MiB of base64 payload, but are not a hard outbound guarantee
+  for all inputs, failures or configured overrides.
 - [Pi 1.5.2 extension runner](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/src/core/extensions/runner.ts),
   `emitBeforeProviderRequest()`, catches handler exceptions and returns the current payload.
   This behavior was also inspected in the installed 1.5.2 distribution. A thrown hook error is
@@ -126,6 +134,9 @@ ledger without demonstrated need, or promise to police arbitrary third-party pay
   distinguish the 48 MiB JSON-body limit from per-image limits; inline base64 contributes to
   that body. Direct requests also have a documented image-count ceiling of 600. A gateway
   may impose different byte/count ceilings. Neither count-only nor byte-only filtering suffices.
+  Per-image constraints also apply: 32 MiB for inline images, 8192 pixels per side below
+  15 images, and 4096 per side for 15 or more. These are direct-route documentation, not
+  universal gateway defaults. Payload bytes, individual image size and dimensions are distinct.
 - [Pi issue 9579](https://github.com/earendil-works/pi/issues/9579) discusses native per-image
   sizing and temporary image blocking. Those are useful controls, not evidence of automatic
   aggregate-byte recovery. [Issue 10162](https://github.com/earendil-works/pi/issues/10162)
@@ -207,7 +218,21 @@ Prefer Pi's native repeated `-e <local-entrypoint>` for optional modules, leavin
 package registration intact. Optional entrypoints must not also be auto-loaded by a manifest
 or directory glob. Preserve foreign native resources and existing argument/environment contracts.
 This is native extension selection, not a second installer. A reviewed extension can be used
-globally or per profile without acquiring it again. No launch-time network acquisition.
+globally or per profile without acquiring it again. Managed selection introduces no launch-time
+network acquisition.
+
+Before connection projection, native initialization or extension loading, the managed launcher
+must refuse operator-supplied `-ne` / `--no-extensions`. No operator decision accepts disabling
+the mandatory permission adapter through this route. Refuse native CLI extension sources that
+can trigger acquisition, including npm, git and remote URL forms; direct users to reviewed
+configuration and the existing lifecycle route. Preserve any permitted existing local extension
+behavior within the declared foreign-ordering exclusion. Validate using pinned Pi's option
+semantics, including repeated options, consumed option values and `--`: do not substring-scan
+prompts or mistake an option's literal value for an active disabling flag. Raw Pi remains the
+explicit unmanaged route. Do not claim this makes in-process extensions a security sandbox.
+This CLI policy does not prove native foreign package declarations never fetch; document that
+existing native behavior as outside the managed acquisition guarantee, rather than silently
+rewriting foreign settings or adding a second package policy system.
 
 Loading order is a supported-composition contract, not a universal final-hook guarantee.
 Order GenosAI-managed payload transformers deterministically, with budget validation after
@@ -270,13 +295,28 @@ as independent validated per-route options and satisfy both. Do not infer gatewa
 the provider/model name. Use an explicitly configured route ceiling; a conservative 40 MiB target
 for a documented 48 MiB direct route is an example, not a global DeepSeek default.
 
+For an opted-in route, validate applicable individual-image byte and dimension limits on the
+final candidate as well. Keep these restrictions configurable through the same adapter/options
+boundary; no separate image-processing framework or global provider-name constants. Specify
+the byte basis explicitly: native base64-payload targets, serialized request bytes and the
+provider's single-image size restriction are not interchangeable measurements. Reuse Pi's
+native processor for resizing and inspect the resulting image, not just its success flag.
+Evaluate count-dependent dimension limits using the final image count and recheck after
+reduction; test the 14/15-image boundary. Failed normalization can leave an original image in
+history, so validate that original if it remains in the outbound candidate. Unknown image
+measurements fail closed. Resize a protected image when permitted; if it still violates an
+applicable hard limit, refuse with zero dispatch instead of silently omitting or forwarding it.
+Older omissions remain subject to the established history/protection policy. This adds no
+claim of complete provider-input validation: other unsupported image forms or restrictions
+must be explicitly outside the supported adapter contract, not marked compliant without proof.
+
 **Coverage:** guarantees apply to supported normal agent-turn requests (including subsequent
 tool-loop requests) on the tested API/transport and managed extension composition. They do not
 cover compaction, branch summaries, independent nested model calls or arbitrary later third-party
 transformers. Document and test this boundary rather than calling the hook provider-wide.
 
 **Technical gate:** first test `ctx.abort()` inside the payload hook against an actual 1.5.2
-recording local endpoint. Oversized, over-count and intentionally unmeasurable candidates must
+recording local endpoint. Oversized, over-count, per-image-invalid and unmeasurable candidates must
 produce zero HTTP requests, including with native retries enabled and after the run settles.
 A caught throw may accompany an abort for diagnostics; throwing alone, warning, or returning
 invalid payloads is not acceptable. Test managed payload-growing handlers before validation,
@@ -286,7 +326,7 @@ supported mechanism meets this invariant, stop that path and return for review; 
 weaken the guard or fork the provider/runtime.
 
 Retry only a confirmed byte/count rejection, only with a measured reduction in the rejected
-dimension while satisfying both configured limits, and with at most one plugin recovery per
+dimension while satisfying all applicable configured limits, and with at most one plugin recovery per
 input coordinated with Pi's native retry/settle behavior. Aborts must not schedule recovery.
 Generic connection resets, auth failures, rate limits and ambiguous 503 responses are not
 image-limit evidence. Their existing native behavior must not gain plugin image-recovery loops.
@@ -317,12 +357,18 @@ marketplace acquisition and hot-changing the plugin set inside an active process
 1. One private input owner; disabled public defaults and credential-free tooling installation remain valid.
 2. Global plus selected-profile activation is deterministic, deduplicated and process-local.
 3. Mandatory permission integration, shared skills and foreign resources survive installation and selection.
-4. No implicit runtime upgrade, global npm change, plugin credential reads or package downloads at launch.
+   Managed CLI overrides cannot disable the adapter or introduce remote extension acquisition;
+   refusal occurs before projection/loading and respects native option/value/`--` boundaries.
+4. No implicit runtime upgrade, global npm change, plugin credential reads or managed/CLI-triggered
+   package acquisition at launch. Foreign native package declarations retain the documented exclusion.
    Native model authentication remains with its existing owner; verification uses no paid calls.
 5. Saved originals and text are preserved; omission markers cannot replace unrelated text or tool IDs.
-6. Actual serialized bytes and image count govern independent route budgets; unknown measurement cannot produce a success result.
+6. Actual serialized bytes, image count and applicable per-image byte/dimension limits are
+   independently checked on the final candidate; failed native resizing is not evidence of
+   compliance. Unknown measurement cannot produce a success result.
 7. For the declared agent-turn transport and managed ordering, oversized/over-count/unmeasurable
-   opted-in requests cannot reach transport. No universal final-hook or nested-call coverage is claimed.
+   opted-in requests, including those violating individual-image limits, cannot reach transport.
+   No universal final-hook or nested-call coverage is claimed.
 8. Unmatched/non-opted-in routes are unchanged. Recovery budgets and learned limits never leak across routes.
 9. Reapply is idempotent; uninstall removes owned resources only and preserves unrelated native files.
 10. Diagnostics expose counts, bytes, route match, action and retry reason without bodies, images or secrets.
@@ -335,10 +381,12 @@ marketplace acquisition and hot-changing the plugin set inside an active process
 - [ ] Add failing feature/regression cases below using [configuration tests](../agents/tests/providers/pi/config.test.js), [private input tests](../agents/tests/test_private_config.py), [platform tests](../agents/tests/test_platform_paths.py) and [native transport fixtures](../agents/tests/providers/pi/transport.js).
 - [ ] Extend `config.py` and `runtime/configure.js` at their existing schema/snapshot boundaries; support global plugins even when no connection profile is configured for setup. Keep normal bare launch refusal intact.
 - [ ] Extend `runtime/launch.sh` with deterministic native optional-extension selection and process-local non-secret options. Reuse Windows transport/path helpers when needed; preserve foreign environment entries and opaque prompt arguments.
+- [ ] Add pre-projection managed CLI refusal for extension-disabling flags and acquisition-capable remote extension sources. Verify pinned argument semantics and literal prompt/value handling; do not mutate foreign native package settings.
 - [ ] Add the smallest Pi-owned optional entrypoint/ID resolver needed for the selected contract. Keep optional modules out of unconditional manifest discovery; retain the existing mandatory package.
 - [ ] Establish D4's thin adapter contract and validate byte/count/policy options at the existing input boundary. Demonstrate two configurations and a synthetic replacement implementation without changing lifecycle/launcher code or reading an independent plugin config file.
 - [ ] Select an immutable upstream revision, audit helper dependencies/license, and integrate only needed budgeting/resizing logic. Add provenance/notices and exact source admission for incorporated files; no floating source reference in shipped code.
 - [ ] Implement independent scoped byte/count budgets, boundary-derived protected-image policy, confirmed bounded recovery and observable refusal; verify supported OpenAI-compatible payload handling and explicit coverage/no-op behavior for unsupported routes.
+- [ ] Validate applicable per-image byte/dimension restrictions on final outbound candidates, reusing native processing. Cover originals retained after processor failure and the count-dependent dimension boundary; refuse protected images that cannot fit without altering persisted originals.
 - [ ] Exercise existing install/uninstall, source-move ownership, credential-free setup and second-apply checks. Change lifecycle code only where an acceptance case demonstrates a missing responsibility.
 - [ ] Update stable owners below and register new source/test files through [source disposition](../tools/source-manifest.json). Resolve this TODO's own disposition explicitly before release checks; it is currently not an admitted export file.
 - [ ] Run the full declared matrix, inspect the complete diff, and request renewed review if the technical gate requires a different design.
@@ -355,9 +403,11 @@ Use generated public images, synthetic keys and local recording endpoints only.
 | Global/profile selection — permanent guard | New plugin fields are refused today; no global/profile union, deduplication or override contract exists. |
 | Configurability/replaceability — permanent guard + acceptance | Change limits/policy and select a synthetic alternate adapter using only configuration and next launch; verify different outbound results, unchanged source/native registration and identical independent safety enforcement. |
 | Validation/no mutation — permanent guard | Establish unsupported ID/options/budget and inherited-environment controls; verify refusals leave native files unchanged. |
+| Managed CLI overrides — permanent guard + native acceptance | Current launcher forwards `--no-extensions` and `-ne`; prove each refuses before projection, native initialization, extension execution or requests. Cover remote npm/git/URL sources through `-e` and `--extension`, repetitions and supported native forms; acquisition counters stay zero. Preserve prompt text after `--`, literal flag-like option values, spaced paths and supported local-extension behavior. |
 | Native lifecycle — acceptance | Installed route cannot yet enable one optional extension only for a selected profile while preserving guard/foreign extensions. |
 | Aggregate bytes — permanent guard + native acceptance | Multiple individually valid synthetic images exceed a local body ceiling and the current route sends an oversized request. Test reduction from above 40 MiB, a smaller gateway ceiling and the 48 MiB boundary. |
 | Image count — permanent guard + native acceptance | Tiny images pass byte checks but exceed a local 20/30-image cap; cover an 8-image option, exact-cap boundaries, and both constraints simultaneously. No model-name-derived global cap. |
+| Individual-image constraints — permanent guard + native acceptance | Under aggregate byte/count ceilings, test excessive single-image size, excessive dimensions and native processing failure that retains the original. Cover configured smaller limits, the direct-route 32 MiB restriction, 8192/8193 and 4096/4097 dimensions at 14/15 images, and a reduction from 15 to 14. Permitted resizing must yield independently valid output; an invalid/unmeasurable protected image must produce zero dispatch with originals/text unchanged. |
 | Request veto — permanent guard + native acceptance | A throwing hook currently does not prove zero dispatch. Test `ctx.abort()` for oversize, over-count and measurement failure with native retries enabled; record zero HTTP requests through settlement. |
 | Ordering/coverage — permanent guard + native acceptance | Show a later foreign hook can invalidate an earlier check; prove managed growth precedes the guard and do not claim the foreign case is protected. Inspect/test normal turns versus compaction/branch/nested paths to delimit hook coverage. |
 | Protected images/history — permanent guard | Define current/unprocessed and successful-answer history, then demonstrate missing outbound reduction; assert original records/text/images remain intact after reduction, retry and resume. |
@@ -370,6 +420,10 @@ Instrument the provider's received UTF-8 body and dispatch count, not only the p
 For a veto case, prove a known-bad control reaches the endpoint when the guard is absent.
 For serialization, include non-ASCII text, system instructions, tools and base64 expansion.
 For image processing, decode resized outputs and exercise corrupt/unsupported inputs and failure paths.
+Use valid generated images for dimension/size violations and a controlled native processing failure
+to exercise retained-original behavior; malformed headers alone are not a production-shaped size test.
+For CLI refusal, capture native-file hashes, extension/acquisition execution and endpoint counts.
+No-mutation proof must cover existing owned projections as well as a fresh home, on both platforms.
 Original session records must remain unchanged; explicitly account for any append-only native metadata.
 Do not demand byte-identical whole session files while a normal session is appending new messages.
 
@@ -406,7 +460,8 @@ not a mocked PASS. Paid provider calls are unnecessary for this acceptance.
   a documentation subtree just for this bounded change.
 - **Content:** options ownership, global/profile precedence, reapply/next-launch behavior, route scope,
   replaceable adapter boundary, configurable byte/count policies, managed ordering and excluded call
-  paths, omission/refusal semantics, diagnostics and supported native acceptance.
+  paths, per-image byte/dimension checks, managed CLI override refusals, omission/refusal semantics,
+  diagnostics and supported native acceptance. State the boundary for foreign native package acquisition.
 - **Duplication avoided:** examples reference the executable schema; package pins/provenance have one
   owner. Stable docs, code, comments and tests must not reference this transient TODO.
 
@@ -421,10 +476,12 @@ lifecycle removal, preserving foreign resources. Do not add a separate rollback 
 ## Completion criteria
 
 Q1 must be resolved before implementation. Completion requires recorded red/green evidence for the
-matrix, proven zero-dispatch refusal and actual serialized byte/count bounds for the declared
+matrix, proven zero-dispatch refusal and actual serialized byte/count/per-image bounds for the declared
 agent-turn transport/composition, preserved originals/text, configuration-only policy/adapter
 selection changes, global/profile isolation, idempotent lifecycle/removal, and real Windows/WSL
 installed-route proof. Unsupported third-party ordering and summary/nested calls are explicit exclusions.
+Managed extension-disabling and remote-acquisition CLI attempts must refuse without mutation or
+acquisition, while literal prompts and supported native argument values remain unchanged.
 All existing required checks must pass with explicit source disposition. License/provenance and
 public-information review must be complete. No unverified community reliability claim, private
 session replay, runtime fork, extra configuration authority or unrelated diff may substitute for proof.
@@ -461,3 +518,17 @@ Keep this TODO open if native cancellation/ordering or a required platform remai
 - **Verification:** read-only pinned runtime inspection and public primary-source review; document
   links, diff, privacy and secret checks. No implementation or provider request performed.
 - **Authority:** D4 added; Q1 remains open.
+
+### 2026-11-20 — Per-image restrictions and managed CLI overrides
+
+- **Assessment:** F6 accepted: native resizing defaults do not establish outbound compliance,
+  because failed tool-image normalization preserves originals. F7 accepted: forwarded native
+  flags can disable discovered permissions while explicit optional extensions remain enabled.
+- **Changes:** added configurable final per-image checks, native-failure and 14/15-image boundary
+  tests, pre-projection CLI refusal, remote-source no-acquisition controls and literal-argument tests.
+  Kept the existing adapter/lifecycle architecture and cancellation experiment first.
+- **Qualification:** defaults are not unconditional native guarantees; CLI acquisition refusal
+  does not establish a no-network guarantee for arbitrary foreign native package declarations.
+- **Verification:** inspected pinned normalizer, resize defaults, CLI parser and current launcher;
+  checked public provider limits and the amended document. Runtime behavior remains unverified.
+- **Authority:** no new operator decision or implementation approval; Q1 remains open.
