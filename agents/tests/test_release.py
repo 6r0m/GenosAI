@@ -176,18 +176,37 @@ class Distribution(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'missing admitted source scope: plans'):
             release.check_index(source,self.base/'index-typo')
 
-    def test_portable_paths_refuse_separators_drive_volume_and_dot_segments(self):
-        for name in ('todo/a.md','agents/x/y.md'):
+    def test_portable_paths_refuse_unrepresentable_target_names(self):
+        for name in ('todo/a.md','agents/x/y.md','todo/a b.md'):
             self.assertTrue(release.portable(name),name)
-        for name in ('','todo/a:b.md','todo/a'+chr(92)+'b.md','todo/nul'+chr(0)+'x.md','../x','todo/./x','/abs/x','a//b'):
+        for name in ('','todo/a:b.md','todo/a'+chr(92)+'b.md','todo/nul'+chr(0)+'x.md','../x','todo/./x','/abs/x','a//b',
+                     'todo/CON.md','todo/nul','todo/com1.txt','todo/LPT9','todo/a?.md','todo/a<1>.md','todo/a|b.md',
+                     'todo/a*b.md','todo/a"b.md','todo/plan.','todo/trail ','todo/dir./x.md','todo/'+chr(7)+'bell.md'):
             self.assertFalse(release.portable(name),repr(name))
+
+    def test_uppercase_private_names_stay_excluded_inside_a_scope(self):
+        source=self.base/'source';source.mkdir()
+        (source/'README.md').write_text('public');self.admit(source,'README.md','todo/')
+        (source/'todo/done').mkdir(parents=True)
+        (source/'todo/done/plan.md').write_text('plan')
+        private=('todo/provider.KEY','todo/.ENV','todo/CONFIG.LOCAL.JSON','todo/TMP/notes.md','todo/done/OUTPUT.LOG')
+        for name in private:
+            file=source/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('synthetic private marker')
+        self.assertEqual(set(release.export(source,self.base/'export')),{'README.md','todo/done/plan.md','tools/source-manifest.json'})
+        for name in private:
+            with self.subTest(name=name):
+                artifact=self.base/('artifact-'+name.replace('/','-'))
+                artifact.mkdir();(artifact/'tools').mkdir()
+                (artifact/'tools/source-manifest.json').write_text((source/'tools/source-manifest.json').read_text())
+                file=artifact/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('synthetic private marker')
+                with self.assertRaisesRegex(ValueError,'forbidden distribution artifact'):release.check(artifact,True)
 
     @unittest.skipUnless(os.name=='posix','requires POSIX filename semantics')
     def test_unportable_descendants_refuse_on_a_posix_host(self):
         source=self.base/'source';source.mkdir()
         (source/'README.md').write_text('public');self.admit(source,'README.md','todo/')
         (source/'todo').mkdir()
-        for name in ('dupe:a.md','nested'+chr(92)+'x.md','nul'+chr(0)+'x.md'):
+        for name in ('dupe:a.md','nested'+chr(92)+'x.md','CON.md'):
             with self.subTest(name=repr(name)):
                 (source/'todo'/name).write_text('plan')
                 with self.assertRaisesRegex(ValueError,'nonportable source path'):list(release.source_files(source))

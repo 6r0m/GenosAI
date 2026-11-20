@@ -15,18 +15,30 @@ ROOT=Path(__file__).resolve().parents[1]
 SOURCE_MANIFEST=Path('tools/source-manifest.json')
 PRIVATE_DIRS={'.git','tmp','node_modules','__pycache__','.trash','synced','.playwright','.playwright-cli','.venv','logs','.cache','.pytest_cache','.mypy_cache','.ruff_cache','.toolchain','.claude','.codex','.pi','.agents'}
 PRIVATE_SUFFIXES={'.key','.pem','.p12','.pfx','.log','.bak','.tmp','.pyc','.pyo'}
+PRIVATE_NAMES={'config.local.json','config.local.jsonc','machine.json','repos.json','.env'}
+LOWER_DIRS={name.casefold() for name in PRIVATE_DIRS}
+LOWER_SUFFIXES={name.casefold() for name in PRIVATE_SUFFIXES}
+LOWER_NAMES={name.casefold() for name in PRIVATE_NAMES}
+WINDOWS_FORBIDDEN=set('<>:"\\|?*')
+WINDOWS_RESERVED={'con','prn','aux','nul'}|{'com%d'%i for i in range(1,10)}|{'lpt%d'%i for i in range(1,10)}
 
 def private(relative):
-    parts=relative.parts
-    return (any(p in PRIVATE_DIRS for p in parts) or
+    parts=[part.casefold() for part in relative.parts]
+    name=relative.name.casefold()
+    return (any(p in LOWER_DIRS for p in parts) or
             (parts[0]=='secrets' and len(parts)>1 and relative.as_posix()!='secrets/README.md') or
-            relative.name in {'config.local.json','config.local.jsonc'} or any(relative.name.startswith(n+'.') for n in ('config.local.json','config.local.jsonc')) or
-            relative.name in {'machine.json','repos.json','.env'} or
-            (relative.name.startswith('.env.') and relative.name!='.env.example') or
-            relative.suffix in PRIVATE_SUFFIXES)
+            name in LOWER_NAMES or any(name.startswith(n+'.') for n in ('config.local.json','config.local.jsonc')) or
+            (name.startswith('.env.') and name!='.env.example') or
+            relative.suffix.casefold() in LOWER_SUFFIXES)
 
 def portable(name):
-    return bool(name) and not any(c in name for c in ('\\',':','\0')) and not any(p in ('','.','..') for p in name.split('/'))
+    if not name: return False
+    for part in name.split('/'):
+        if part in ('','.','..'): return False
+        if any(c in WINDOWS_FORBIDDEN or ord(c)<32 for c in part): return False
+        if part.endswith((' ','.')): return False
+        if part.split('.',1)[0].casefold() in WINDOWS_RESERVED: return False
+    return True
 
 def case_collisions(names):
     grouped={}
