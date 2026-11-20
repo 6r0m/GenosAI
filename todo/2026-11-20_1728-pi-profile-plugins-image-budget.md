@@ -36,10 +36,6 @@ driven by configuration rather than edits scattered across the integration.
 
 ### Operator decisions
 
-- **D1:** Produce an investigation TODO for review, without implementing the change.
-  - Effect: this artifact proposes work; it does not approve installation or implementation.
-  - Reason: investigate the appropriate integration first.
-  - Date/source: operator request, 2026-11-20.
 - **D2:** Repository content must contain only public, portable information.
   - Effect: use public sources and synthetic fixtures; exclude private operational context.
   - Reason: the repository is public.
@@ -55,11 +51,31 @@ driven by configuration rather than edits scattered across the integration.
     safety enforcement; keep the adapter contract small and implementations replaceable.
   - Reason: quick changes to unblocker behavior as restrictions change.
   - Date/source: operator follow-up request, 2026-11-20.
+- **D5 [SUPERSEDED IN PART by D6 — implementation paused for candidate investigation]:**
+  Implement the reviewed plan, starting with its local feasibility gate.
+  - Supersedes: D1 for the reviewed implementation phase.
+  - Effect: authorizes the reviewed scope. D6 pauses production edits pending the candidate review.
+  - Reason: not stated.
+  - Source: operator invocation of `implement-approved-change` for this TODO.
+- **D6:** Investigate existing community packages and check their evidence before proceeding with implementation.
+  - Supersedes in part: D5, by pausing implementation for this investigation.
+  - Effect: compare existing candidates and verify the strongest one against the pinned runtime.
+  - Reason: establish whether reuse is better than building another image-budget engine.
+  - Source: operator follow-up request.
+
+### No longer binding
+
+- **D1 [SUPERSEDED by D5]:** Produce an investigation TODO for review, without implementing the change.
+  - Effect: this artifact proposes work; it does not approve installation or implementation.
+  - Reason: investigate the appropriate integration first.
+  - Date/source: operator request, 2026-11-20.
 
 ### Operator gates
 
-- **Q1 [OPEN - BLOCKING]:** Is this implementation plan approved? Gates implementation,
+- **Q1 [CLOSED by D5]:** Is this implementation plan approved? Gates implementation,
   not further read-only investigation. No external publication or live cutover is included.
+- **Q2 [OPEN - BLOCKING]:** Approve the upstream-first revision before resuming implementation.
+  This gates production changes under the revised approach.
 
 ### Working assumptions
 
@@ -68,15 +84,19 @@ driven by configuration rather than edits scattered across the integration.
   necessary for the requested global/profile selection contract.
 - **A2 [ACTIVE]:** Enablement is fixed for a launched process. Configuration changes take
   effect on its next launch; changing the selected model does not silently enable other plugins.
-- **A3 [ACTIVE]:** Reuse upstream image-budget algorithms selectively under their license;
+- **A3 [REJECTED by evidence]:** Reuse upstream image-budget algorithms selectively under their license;
   adoption of the entire upstream extension is conditional on compatibility and ownership proof.
+  The intact extension loaded and reduced requests on pinned Pi, so stripping it down before
+  testing would discard working behavior without evidence that the integration requires it. See A4.
+- **A4 [ACTIVE]:** Start from the pinned `pi-image-budget` implementation and retain its tested
+  algorithms. Prefer a small upstream integration seam and fix if the acceptance cases support it.
 
 ## Non-goals
 
 No second plugin manager, daemon, marketplace, provider fork, separate operator-edited plugin
 file, automatic remote uploads, secret copying, network diagnosis, or general retry framework.
-No unrelated provider refactor. No promise to isolate existing shared native authentication
-projections between concurrent mixed-provider sessions. No inference that a socket reset proves
+No unrelated provider refactor. Preserve the existing isolation between different native profile
+directories and the shared session-history contract. No inference that a socket reset proves
 a request-size failure. Public defaults remain unconfigured and optional plugins disabled.
 No provider-wide interception of compaction, branch summaries or independent nested SDK calls.
 No live code fetching, arbitrary configuration-supplied imports, persistent image-consumption
@@ -92,7 +112,7 @@ ledger without demonstrated need, or promise to police arbitrary third-party pay
 | [Package manifest](../agents/package.json) | The managed package declares the permission adapter and shared skills; optional plugins are not currently selected by profile. |
 | [Configuration input](../agents/config.py), `validate()` / `pi_input()` | Pi top-level fields are explicitly allowed and one selected platform snapshot is produced. |
 | [Profile owner](../agents/providers/pi/runtime/configure.js), `resolveProfiles()` | Unknown profile keys refuse; current allowed keys contain no plugin selection/options. Setup and credential-requiring launch are separate. |
-| [Managed launcher](../agents/providers/pi/runtime/launch.sh) | Leading `--profile` selects a run; one validated snapshot supplies native arguments. Lifecycle mutations through `pi-sot` are deliberately refused. |
+| [Managed launcher](../agents/providers/pi/runtime/launch.sh) | Leading `--profile` selects a run; one validated snapshot supplies native arguments and the profile's native directory. Lifecycle mutations through `pi-sot` are deliberately refused. |
 | [Lifecycle adapter](../agents/providers/pi/lifecycle.sh), `pi_native_package()` | Existing install registers the local package with native Pi. Runtime acquisition is separate; Windows environment transport already has a helper. |
 | [Lifecycle contract](../agents/lifecycle/README.md) | Reapplying the selected provider is already supported; no new apply command is needed to express this feature. |
 
@@ -148,12 +168,32 @@ ledger without demonstrated need, or promise to police arbitrary third-party pay
   evidence, not an independently rerun acceptance result or a stable limit for those model names.
   [A separate 503 report](https://github.com/earendil-works/pi/issues/10162#issuecomment-6719166976)
   demonstrates why an ambiguous server error cannot safely identify an image-count rejection.
-- [pi-image-budget source](https://github.com/Aaalice233/pi-image-budget/blob/main/src/index.ts)
-  and [package](https://github.com/Aaalice233/pi-image-budget/blob/main/package.json), observed
-  version 0.2.0: compression, payload measurement and bounded recovery are useful references.
-  The inspected index blob is `8e9c0f09e6f066f3c55e095e83733b7723a369b6`;
-  this is a file identity, not an adoption commit pin. Its dev runtime range is `^0.87.1`.
-  Record an immutable repository revision before incorporating code.
+- `pi-image-budget` identifies itself as 0.2.0 at audited commit
+  `742e9f0afd1e303117fa28c41c9ef50b9b7e3d66`. It loads through a Git or local package.
+  The Git repository advertises no tags or GitHub releases and the exact npm package name
+  returned 404. Use the commit for reproducibility. Its dev runtime range is `^0.87.1`.
+  [Pinned manifest](https://github.com/Aaalice233/pi-image-budget/blob/742e9f0afd1e303117fa28c41c9ef50b9b7e3d66/package.json).
+- Its unmodified `node --test test/*.test.ts` passed **57/57** with GenosAI's Pi 1.5.2 runtime.
+  The unmodified `node scripts/e2e.mjs --turns=10` exited **1** on a local 8 MiB gateway.
+  Turns 1–7 succeeded. Turn 8 sent about 8.1 MiB, received 413 and logged a lowered limit,
+  with no second request in that turn. Turns 9–10 succeeded around 6 MiB. The four-turn
+  `--without-extension` control reproduced 413 at about 9 and 12 MiB on turns 3–4.
+  Native Windows Pi 1.5.2 on Node 24 independently reproduced the same first seven successes
+  and the same unretried turn-8 413 (`--turns=8`, exit **1**). These runs demonstrate package
+  loadability and useful reduction in both CLIs, plus a concrete same-turn recovery gap.
+  [Upstream harness](https://github.com/Aaalice233/pi-image-budget/blob/742e9f0afd1e303117fa28c41c9ef50b9b7e3d66/scripts/e2e.mjs).
+- A diagnostic rerun kept the candidate source intact and added a read-only settle observer.
+  With native auto-compaction enabled, upstream proposed only a learned-limit entry and no
+  continuation after the 413. With auto-compaction disabled in the fixture, the same turn
+  retried once at about 6.0 MiB and completed. Pi classifies 413 as overflow and can omit the
+  failed attempt from projected messages before `agent_before_settle`. Upstream searches those
+  projected messages for the failed attempt before it offers recovery. This makes native overflow
+  coordination a compatibility requirement. [Pi session loop](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/src/core/agent-session.ts).
+- The earlier local CLI cancellation probe against Pi 1.5.2 observed zero loopback HTTP
+  requests for each of the byte, count, individual-image and measurement-failure abort cases.
+  The throw-only control reached the endpoint and a transient-error control retried. A later
+  discovered transform could still grow an accepted request. This is feasibility evidence for
+  the tested JSON CLI mode and hook ordering. Native Windows and interactive acceptance remain open.
 - [pi-imagefiles routing](https://github.com/adamcjm/pi-imagefiles/blob/main/extensions/pi-imagefiles/src/scan.ts)
   requires a `deepseek*vision*` model ID; `deepseek-flash` does not match.
   Its [credential resolver](https://github.com/adamcjm/pi-imagefiles/blob/main/extensions/pi-imagefiles/src/files-api.ts)
@@ -164,9 +204,12 @@ ledger without demonstrated need, or promise to police arbitrary third-party pay
 
 The proposed outbound-only approach is justified; production-grade compatibility is **unverified**.
 The upstream image-budget final guard can warn and return an unchanged oversized payload when
-no images can be removed. It also reads independent user/project configuration and appends
-recovery/custom session entries. Preserving original records is different from keeping the entire
-session file byte-identical. Do not describe upstream as an unmodified fit or a proven hard guard.
+no images can be removed. It also reads independent user/project configuration, matches learned
+state by provider/model, and appends recovery/custom entries. The factory's injected option is
+limited to resizing, so the configuration and exact-route options need an explicit upstream seam
+or a narrowly patched entrypoint. Its own tests accept hard per-request caps outranking recent-image
+protection and dropping a protected invalid image. Verify the stricter current-image contract through
+the integration. [Pinned implementation](https://github.com/Aaalice233/pi-image-budget/blob/742e9f0afd1e303117fa28c41c9ef50b9b7e3d66/src/index.ts).
 
 Zero-dispatch cancellation, the supported managed ordering, Windows native loading,
 resumed-session behavior and bounded recovery on pinned Pi remain implementation acceptance
@@ -197,7 +240,7 @@ body-size ceiling. These constraints require separate checks against the same ef
 
 ## Decision
 
-**Recommendation, pending Q1:** reuse ordinary `make install PROVIDER=pi PLATFORM=host|windows|both`
+**Recommendation, pending Q2:** reuse ordinary `make install PROVIDER=pi PLATFORM=host|windows|both`
 for idempotent installation/reconciliation; retain `RUNTIME=1` only for explicit runtime acquisition.
 Do not add an apply command. Starting a new session resolves current plugin choices from the
 same profile snapshot already used for the connection.
@@ -269,10 +312,18 @@ Do not promise configuration can express a new algorithm or load unreviewed code
 Start with one production implementation; use a synthetic second adapter to prove replaceability
 without building an unused framework. Unknown options/IDs refuse rather than falling back.
 
-The first optional extension is an image-budget adapter, using pinned/audited upstream helpers
-where useful (A3). It accepts resolved options rather than consulting upstream user/project
-config files. Reuse native resizing; retain MIT notices for copied code. Avoid importing all
-upstream recovery/configuration machinery merely to access a pure budgeting helper.
+Use the pinned `pi-image-budget` implementation as the baseline (A4). Keep upstream selection,
+resizing, payload sizing and error classification where they pass the approved contract. Reuse
+its recovery mechanism once it passes the same-turn 413 test on the pinned runtime. GenosAI owns
+resolved options, exact-route activation, protected-image and final enforcement requirements, and
+the observed CLI and lifecycle contracts. Keep resulting changes reviewable against the source
+pin. Prefer an upstream option and compatibility fix. If that is unavailable, keep a small
+licensed patch at the dependency boundary with its provenance and tests. Avoid a clean-room engine.
+Exercise recovery with native auto-compaction enabled, and coordinate confirmed image-limit
+overflow without disturbing native compaction for unrelated errors or user requests. The
+compaction-disabled fixture is diagnostic evidence, not the proposed production setting.
+If the necessary changes exceed that boundary, bring the measured gap back for review before
+starting another implementation. Do not activate upstream recovery simply because its unit tests pass.
 
 Scope every request transformation and learned limit to the resolved provider, model, API and
 normalized endpoint. An in-session model/route switch must not inherit another route's budget;
@@ -346,9 +397,11 @@ marketplace acquisition and hot-changing the plugin set inside an active process
 | Option | Additional moving parts / trade-off | Assessment |
 |---|---|---|
 | Native Block images / per-image resizing | No new module, but manual/all-image behavior or no aggregate-body guarantee | Emergency control, not the requested selective automatic behavior. |
-| Globally install upstream image-budget unchanged | Separate configuration precedence and recovery state; affects non-selected routes by default | Reject unchanged; retain audited algorithms as reference. |
+| `pi-image-budget` at the audited Git commit | Measures final JSON and supports independent image budgets. Needs a config/route seam, current-image and refusal enforcement, and a same-turn recovery fix | Recommended baseline pending Q2. |
+| [pi-image-slim 0.2.2](https://github.com/wiidede/pi-image-slim/blob/15c290dc4c358eb9a2feed312dd61541fec56ac7/index.ts) | Default `tool_result` compression changes saved tool image bytes. `compress: false`, `caption: false`, `strip: true` keeps the image pixels, but stripping still adds path or batch notes to persisted tool results. `maxKeptImages` counts image-bearing messages, and there is no serialized body cap | Useful for bandwidth or history-window policy. Strict outbound-only use would require isolating its strip hook. |
+| [pi-image-compact budget component](https://github.com/Don-Yin/pi-image-compact/blob/db69dbaaccbc247f591c7305fe992c6b76abfdd6/src/budget.ts) | Budget-only hook omits older images from a request copy using fixed base64-image totals. The package manifest also enables compression and pruning by default. Pruning rewrites session files after compaction | Budget-only can preserve originals. It lacks final body, count and refusal checks. |
 | Rewrite native package filters on each launch | Shared settings writer and concurrency/drift coordination for process-local selection | Prefer local `-e` selection with no new shared settings mutation. |
-| Small audited outbound adapter | One selection contract and bounded image logic | Recommended; do not rewrite image codecs or all upstream policy. |
+| New image-budget engine | GenosAI would own image policies, sizing, codecs integration and recovery regressions | Unjustified while the upstream implementation can be tested and adapted. |
 | Files API image offload | Uploads, credentials, remote cache, quota and expiry lifecycle | Excluded from this scope; not a compatible drop-in. |
 | Conversation compaction | Alters text context; byte guarantee still separate | Does not meet the history-preservation goal. |
 
@@ -377,18 +430,18 @@ marketplace acquisition and hot-changing the plugin set inside an active process
 
 ## Implementation tasks
 
-- [ ] After Q1, prove `ctx.abort()` zero-dispatch refusal and managed ordering with installed Pi and a recording local provider before adopting a budgeting implementation. Record unsupported call paths and the later-foreign-hook negative control.
+- [ ] Before integrating, turn the local `ctx.abort()` feasibility result into a reproducible regression with a recording endpoint. Extend it to the actual supported installed modes/platforms. Record unsupported call paths and the later-foreign-hook negative control.
 - [ ] Add failing feature/regression cases below using [configuration tests](../agents/tests/providers/pi/config.test.js), [private input tests](../agents/tests/test_private_config.py), [platform tests](../agents/tests/test_platform_paths.py) and [native transport fixtures](../agents/tests/providers/pi/transport.js).
 - [ ] Extend `config.py` and `runtime/configure.js` at their existing schema/snapshot boundaries; support global plugins even when no connection profile is configured for setup. Keep normal bare launch refusal intact.
 - [ ] Extend `runtime/launch.sh` with deterministic native optional-extension selection and process-local non-secret options. Reuse Windows transport/path helpers when needed; preserve foreign environment entries and opaque prompt arguments.
 - [ ] Add pre-projection managed CLI refusal for extension-disabling flags and acquisition-capable remote extension sources. Verify pinned argument semantics and literal prompt/value handling; do not mutate foreign native package settings.
 - [ ] Add the smallest Pi-owned optional entrypoint/ID resolver needed for the selected contract. Keep optional modules out of unconditional manifest discovery; retain the existing mandatory package.
 - [ ] Establish D4's thin adapter contract and validate byte/count/policy options at the existing input boundary. Demonstrate two configurations and a synthetic replacement implementation without changing lifecycle/launcher code or reading an independent plugin config file.
-- [ ] Select an immutable upstream revision, audit helper dependencies/license, and integrate only needed budgeting/resizing logic. Add provenance/notices and exact source admission for incorporated files; no floating source reference in shipped code.
+- [ ] Turn the reproduced same-turn 413 gap into a managed regression. Keep the immutable upstream revision, audit dependencies/license, and integrate the upstream implementation with the smallest changes needed for the actual acceptance cases. Record provenance/notices and exact source admission for incorporated files.
 - [ ] Implement independent scoped byte/count budgets, boundary-derived protected-image policy, confirmed bounded recovery and observable refusal; verify supported OpenAI-compatible payload handling and explicit coverage/no-op behavior for unsupported routes.
 - [ ] Validate applicable per-image byte/dimension restrictions on final outbound candidates, reusing native processing. Cover originals retained after processor failure and the count-dependent dimension boundary; refuse protected images that cannot fit without altering persisted originals.
 - [ ] Exercise existing install/uninstall, source-move ownership, credential-free setup and second-apply checks. Change lifecycle code only where an acceptance case demonstrates a missing responsibility.
-- [ ] Update stable owners below and register new source/test files through [source disposition](../tools/source-manifest.json). Resolve this TODO's own disposition explicitly before release checks; it is currently not an admitted export file.
+- [ ] Update stable owners below and register new source/test files through [source disposition](../tools/source-manifest.json). The existing `todo/` scope covers this public plan.
 - [ ] Run the full declared matrix, inspect the complete diff, and request renewed review if the technical gate requires a different design.
 
 ## Test-first and verification plan
@@ -412,7 +465,7 @@ Use generated public images, synthetic keys and local recording endpoints only.
 | Ordering/coverage — permanent guard + native acceptance | Show a later foreign hook can invalidate an earlier check; prove managed growth precedes the guard and do not claim the foreign case is protected. Inspect/test normal turns versus compaction/branch/nested paths to delimit hook coverage. |
 | Protected images/history — permanent guard | Define current/unprocessed and successful-answer history, then demonstrate missing outbound reduction; assert original records/text/images remain intact after reduction, retry and resume. |
 | Route switching — permanent guard | Cover matched opt-in, non-opt-in, differing endpoint/API/model, native model switch and two process-local selections without shared plugin-setting mutation. |
-| Recovery — permanent guard + native acceptance | Local 413 then success must show smaller bytes and at most one plugin recovery; explicit count rejection must reduce count. Repeated rejection, text-only overflow, ambiguous 503, reset/401/429, abort and native retry interaction must not produce an uncontrolled continuation. |
+| Recovery — permanent guard + native acceptance | Run with native auto-compaction enabled. A local 413 then success must show smaller bytes and at most one plugin recovery in the same turn, without a compaction request; explicit count rejection must reduce count. Preserve unrelated native compaction. Repeated rejection, text-only overflow, ambiguous 503, reset/401/429, abort and native retry interaction must not produce an uncontrolled continuation. |
 | Platform/reapply/removal — acceptance | Real Windows and WSL native launchers must load the selected local entrypoints with Unicode/spaced paths; second install and owned removal preserve sentinels. |
 | KISS/source/privacy — reviewer judgment | Check sole ownership, dependency/provenance scope, no extra operator config, and no private operational material. Do not replace this judgment with text-presence tests. |
 
@@ -442,7 +495,7 @@ make public-check
 
 Wire any new JavaScript suite into [the existing Node boundary runner](../agents/tests/providers/pi/test_adapter.py)
 so `make test` actually executes it. Use registry-selected native Node; satisfy the pinned scanner prerequisite.
-Check source admission before expecting `make check`/`public-check` to succeed with this new artifact.
+Check source admission for newly incorporated implementation files before running release verification.
 
 Use [fresh export and installed-route acceptance](../agents/tests/providers/pi/README.md) in disposable
 homes from an independent export with the source unavailable. Run `make install PROVIDER=pi PLATFORM=host RUNTIME=1`,
@@ -475,7 +528,7 @@ lifecycle removal, preserving foreign resources. Do not add a separate rollback 
 
 ## Completion criteria
 
-Q1 must be resolved before implementation. Completion requires recorded red/green evidence for the
+Q2 must be resolved before implementing the revised plan. Completion requires recorded red/green evidence for the
 matrix, proven zero-dispatch refusal and actual serialized byte/count/per-image bounds for the declared
 agent-turn transport/composition, preserved originals/text, configuration-only policy/adapter
 selection changes, global/profile isolation, idempotent lifecycle/removal, and real Windows/WSL
@@ -532,3 +585,15 @@ Keep this TODO open if native cancellation/ordering or a required platform remai
 - **Verification:** inspected pinned normalizer, resize defaults, CLI parser and current launcher;
   checked public provider limits and the amended document. Runtime behavior remains unverified.
 - **Authority:** no new operator decision or implementation approval; Q1 remains open.
+
+### Community candidate audit
+
+- D5 authorized the first local experiment. D6 paused production edits for candidate evaluation.
+- The standalone cancellation probe passed its four abort cases and the dispatch and ordering
+  controls. This does not cover a managed plugin running on native Windows.
+- The pinned upstream CLI test missed same-turn 413 recovery on WSL and native Windows despite
+  a passing unit suite. A WSL diagnostic with native auto-compaction disabled isolated the
+  overflow interaction. The managed acceptance test keeps native auto-compaction enabled.
+- Public downloads indicate distribution. The community report exercised its author's separate
+  filter on Pi 1.5.2/Linux and does not establish package adoption or Windows reliability.
+- A4 replaces the earlier selective-first approach. Q2 remains open for the revised approach.
