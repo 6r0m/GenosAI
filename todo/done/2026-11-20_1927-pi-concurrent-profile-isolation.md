@@ -1,8 +1,9 @@
 # Isolate concurrent Pi connection profiles
 
-**Status:** REVIEW REQUIRED  
+**Status:** IMPLEMENTED — Pi scope verified; broader filesystem limitations recorded below
+
 **Scope:** Pi managed runtime, lifecycle, permission-path coverage and native acceptance  
-**Stable documentation owner:** [Pi runtime](../agents/providers/pi/runtime/README.md)
+**Stable documentation owner:** [Pi runtime](../../agents/providers/pi/runtime/README.md)
 
 ## Contents
 
@@ -24,34 +25,43 @@
 ## Goal
 
 Launching a second configured Pi profile must leave an existing session able to use its own
-provider, model, endpoint and credential. Investigate native Pi behavior and propose a small,
-maintainable GenosAI correction under D1–D2.
+provider, model, endpoint and credential. Implement and verify the reviewed native-directory
+correction under D2–D3.
 
 ## Authority register
 
 ### Operator decisions
 
-- **D1:** Investigate the Pi profile failure with `investigate-change` and put the implementation
-  todo in GenosAI.
-  - Effect: investigation and this single todo; no implementation or workstation cutover.
-  - Reason: determine whether native Pi or the GenosAI integration causes the failure.
-  - Date/source: operator request, 2026-11-20.
 - **D2:** Prefer a KISS solution using the best practical industrial approach, if possible.
   - Effect: prefer a supported native boundary over a custom provider/session framework.
   - Reason: not stated.
   - Date/source: operator request, 2026-11-20.
 
+- **D3:** Implement the reviewed Pi profile-isolation todo using `implement-approved-change`.
+  - Supersedes: D1.
+  - Effect: authorizes the reviewed local implementation and its A1–A3 design assumptions; real workstation reapplication remains separate.
+  - Reason: not stated.
+  - Date/source: operator skill invocation, 2026-11-20.
+
+### No longer binding
+
+- **D1 [SUPERSEDED by D3]:** Investigate the Pi profile failure with `investigate-change` and put the implementation
+  todo in GenosAI.
+  - Effect: investigation and this single todo; no implementation or workstation cutover.
+  - Reason: determine whether native Pi or the GenosAI integration causes the failure.
+  - Date/source: operator request, 2026-11-20.
+
 ### Operator gates
 
-None open for this proposal. Implementation requires approval of this todo under D1.
+None open for local implementation under D3.
 
 ### Working assumptions
 
-- **A1 [ACTIVE]:** Preserve the existing schema's ability to name two profiles with the same
+- **A1 [RESOLVED by D3]:** Preserve the existing schema's ability to name two profiles with the same
   provider and different keys/endpoints; concurrency should cover that case too.
-- **A2 [ACTIVE]:** Native mutable preferences and caches may be profile-local. Common GenosAI
+- **A2 [RESOLVED by D3]:** Native mutable preferences and caches may be profile-local. Common GenosAI
   instructions/skills/permission code and existing conversation history remain reusable.
-- **A3 [ACTIVE]:** Isolation is between distinct profile IDs. Editing one profile's connection
+- **A3 [RESOLVED by D3]:** Isolation is between distinct profile IDs. Editing one profile's connection
   while its sessions run requires restarting those sessions; immutable per-invocation snapshots
   are outside this change.
 
@@ -64,24 +74,27 @@ No implementation of the separate optional-plugin/image-budget plan.
 
 ## Verified evidence
 
-### Repository and native facts
+### Baseline repository and native facts
+
+These observations describe the pre-implementation defect. Current behavior belongs to the runtime
+owner linked above; the implementation evidence is in the final review record.
 
 | Evidence | Observation |
 |---|---|
-| [Runtime pin](../agents/lifecycle/providers.conf.sh) | Managed Pi is pinned to `@earendil-works/pi-coding-agent@1.5.2`; both installed managed platform runtimes reported that version. |
-| [Launcher](../agents/providers/pi/runtime/launch.sh) | Every managed invocation sets `PI_CODING_AGENT_DIR` to the same registry-owned base and calls the projector before native dispatch. |
-| [Projector](../agents/providers/pi/runtime/configure.js), `configure()` | Deletes all previously owned auth/model entries from its candidate, then inserts only the selected profile under its native provider ID. The ownership record tracks one current profile. |
-| [Configuration tests](../agents/tests/providers/pi/config.test.js) | Assert removal of previous provider references and exactly one managed provider after competing writers. They prove writer consistency, not continued usability of older sessions. |
-| [Compatible acceptance](../agents/tests/providers/pi/compatible.js) | Retains a real native `ModelRuntime`, switches provider through the shared projector, and asserts that the old runtime loses authentication. |
-| [Endpoint acceptance](../agents/tests/providers/pi/endpoint.js) | Already exercises two DeepSeek profiles with different endpoint/key references, sequentially. A1 preserves a real supported input class. |
+| [Runtime pin](../../agents/lifecycle/providers.conf.sh) | Managed Pi is pinned to `@earendil-works/pi-coding-agent@1.5.2`; both installed managed platform runtimes reported that version. |
+| [Launcher](../../agents/providers/pi/runtime/launch.sh) | Every managed invocation sets `PI_CODING_AGENT_DIR` to the same registry-owned base and calls the projector before native dispatch. |
+| [Projector](../../agents/providers/pi/runtime/configure.js), `configure()` | Deletes all previously owned auth/model entries from its candidate, then inserts only the selected profile under its native provider ID. The ownership record tracks one current profile. |
+| [Configuration tests](../../agents/tests/providers/pi/config.test.js) | Assert removal of previous provider references and exactly one managed provider after competing writers. They prove writer consistency, not continued usability of older sessions. |
+| [Compatible acceptance](../../agents/tests/providers/pi/compatible.js) | Retains a real native `ModelRuntime`, switches provider through the shared projector, and asserts that the old runtime loses authentication. |
+| [Endpoint acceptance](../../agents/tests/providers/pi/endpoint.js) | Already exercises two DeepSeek profiles with different endpoint/key references, sequentially. A1 preserves a real supported input class. |
 | Installed Pi 1.5.2, `dist/core/auth-storage.js`, `AuthStorage.readLatestData()` / `read()`; `dist/core/model-runtime.js`, `prepareRequest()` | Auth storage observes file revisions. Removing a provider makes later resolution fail; `prepareRequest()` raises `Provider is not configured` before transport. Command-output caching does not pin a removed auth entry. |
 | Installed Pi 1.5.2, `dist/config.js`, `getAgentDir()` / `getAuthPath()` / `getModelsPath()` | `PI_CODING_AGENT_DIR` is the supported native boundary for independent configuration roots. |
 | Installed Pi 1.5.2, `dist/core/settings-manager.js`, `FileSettingsStorage` | Settings writes lock the lexical settings path with `realpath: false`. Sharing one writable settings file through different profile symlinks would not give a common lock. |
-| [Permission gate](../agents/providers/pi/permissions/gate.py), `secret()` | Recognizes `.pi/agent/auth.json`; a synthetic `.pi/agent/profiles/alpha/auth.json` is currently not classified as protected. New paths need coverage before use. |
-| [Projector CLI](../agents/providers/pi/runtime/configure.js), [launcher](../agents/providers/pi/runtime/launch.sh) and [acceptance interface](../agents/tests/providers/pi/run.sh) | Current output ends with optional `thinking`. Bash collapses adjacent tab separators: appending a required directory after an empty thinking field would shift that directory into `thinking`. This is a proposed-contract hazard, not a defect in today's four-field output. |
-| [Link removal](../agents/lifecycle/platform-links.sh), `remove_link()` | Accepts only targets below `AI_ROOT`. A shared-session target in the native base is outside that ownership domain; its link requires an exact-target check without widening the shared helper. |
-| [Launcher](../agents/providers/pi/runtime/launch.sh), `list` branch | An explicit selector is validated, but native `list` still receives the base agent directory. New per-profile package registrations require profile-aware inspection. |
-| [Runtime documentation](../agents/providers/pi/runtime/README.md); [verification documentation](../agents/tests/providers/pi/README.md) | Explicitly document sequential sessions and authentication loss. This is an existing GenosAI limitation, not a native Pi requirement. |
+| [Permission gate](../../agents/providers/pi/permissions/gate.py), `secret()` | Recognizes `.pi/agent/auth.json`; a synthetic `.pi/agent/profiles/alpha/auth.json` is currently not classified as protected. New paths need coverage before use. |
+| [Projector CLI](../../agents/providers/pi/runtime/configure.js), [launcher](../../agents/providers/pi/runtime/launch.sh) and [acceptance interface](../../agents/tests/providers/pi/run.sh) | Current output ends with optional `thinking`. Bash collapses adjacent tab separators: appending a required directory after an empty thinking field would shift that directory into `thinking`. This is a proposed-contract hazard, not a defect in today's four-field output. |
+| [Link removal](../../agents/lifecycle/platform-links.sh), `remove_link()` | Accepts only targets below `AI_ROOT`. A shared-session target in the native base is outside that ownership domain; its link requires an exact-target check without widening the shared helper. |
+| [Launcher](../../agents/providers/pi/runtime/launch.sh), `list` branch | An explicit selector is validated, but native `list` still receives the base agent directory. New per-profile package registrations require profile-aware inspection. |
+| [Runtime documentation](../../agents/providers/pi/runtime/README.md); [verification documentation](../../agents/tests/providers/pi/README.md) | Explicitly document sequential sessions and authentication loss. This is an existing GenosAI limitation, not a native Pi requirement. |
 
 Upstream [model selection](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/models.md)
 documents multiple authenticated providers and session-local model selection.
@@ -109,9 +122,9 @@ inspection; implementation must continue to use the pinned version's behavior.
 
 The shared projection mechanism explains the reported error, but the exact historical launch
 sequence in the screenshot was not captured. The diagnostic proves a possible same-provider
-credential/endpoint mismatch, not a real credential leak. Native-directory auth isolation is
-demonstrated; the proposed complete managed CLI/resource/session lifecycle is not implemented or
-proven yet. Existing green tests encode the old limitation and must change with the contract.
+credential/endpoint mismatch, not a real credential leak. Native-directory isolation and the managed
+CLI/resource/session lifecycle now have synthetic runtime proof on WSL and native Windows. Wider
+WSL suite limitations are recorded below; no live workstation reapplication was performed.
 
 The review-round diagnostics below also show why forwarding native `list` alone cannot promise
 an entirely non-mutating inspection route: Pi 1.5.2 creates a missing agent directory while
@@ -123,13 +136,13 @@ no staging, commits or cleanup were performed by this investigation.
 
 ## Current architecture and source of truth
 
-[Local configuration](../agents/configuration.md) owns composition and private references.
-[The Pi runtime owner](../agents/providers/pi/runtime/README.md) owns profile validation,
-selection and native connection projections; [lifecycle](../agents/providers/pi/lifecycle.sh)
-owns installation, package registration and removal. [The package manifest](../agents/package.json)
+[Local configuration](../../agents/configuration.md) owns composition and private references.
+[The Pi runtime owner](../../agents/providers/pi/runtime/README.md) owns profile validation,
+selection and native connection projections; [lifecycle](../../agents/providers/pi/lifecycle.sh)
+owns installation, package registration and removal. [The package manifest](../../agents/package.json)
 owns common skills and the permission extension. Pi owns native protocol behavior and session
-persistence. [Permission policy](../agents/providers/pi/permissions/README.md) and
-[verification](../agents/tests/providers/pi/README.md) retain their existing boundaries.
+persistence. [Permission policy](../../agents/providers/pi/permissions/README.md) and
+[verification](../../agents/tests/providers/pi/README.md) retain their existing boundaries.
 
 ## Problem and root cause
 
@@ -141,7 +154,7 @@ provider. Retained native model objects and refreshed auth storage can then disa
 
 ## Decision
 
-**Proposal, subject to review:** use a persistent native agent directory per configured profile,
+**Approved target under D3:** use a persistent native agent directory per configured profile,
 selected with `PI_CODING_AGENT_DIR`. Extend the existing Pi owner; keep one installed runtime.
 
 1. Derive a profile directory from the registry-owned base and validated profile ID, proposed as
@@ -271,26 +284,26 @@ snapshot lifecycle; changing a live profile's own definition requires restarting
 
 ## Implementation tasks
 
-- [ ] Add failing tests for the matrix below before production changes. Keep the old shared-root
+- [x] Add failing tests for the matrix below before production changes. Keep the old shared-root
   auth-loss behavior as an explicit negative control, not the expected managed outcome.
-- [ ] Extend `configure.js` to own profile-path resolution and selected native projection using
+- [x] Extend `configure.js` to own profile-path resolution and selected native projection using
   one parsed snapshot. Return the resolved directory in its result/CLI contract; update all
-  consumers together, including [the acceptance interface](../agents/tests/providers/pi/run.sh),
+  consumers together, including [the acceptance interface](../../agents/tests/providers/pi/run.sh),
   using the selection-output contract above.
-- [ ] Extend lifecycle provisioning/removal for per-profile canonical instructions, native local
+- [x] Extend lifecycle provisioning/removal for per-profile canonical instructions, native local
   package registration and shared-session links. Preflight before writes; bootstrap selected
   profiles idempotently, using existing platform machinery without a parallel registry.
   Add exact-target session-link ownership without widening the generic removal boundary.
-- [ ] Update `launch.sh` to dispatch the pinned native CLI with that returned directory. Preserve
+- [x] Update `launch.sh` to dispatch the pinned native CLI with that returned directory. Preserve
   source/config immutability, startup effort and forwarding semantics; implement the explicit
   configured/disabled/uninitialized `list` cases above through metadata-only resolution.
-- [ ] Extend `gate.py` and its native startup probe/tests for the new owned auth paths before
+- [x] Extend `gate.py` and its native startup probe/tests for the new owned auth paths before
   enabling those paths. Cover sibling profiles and configurable native base paths.
-- [ ] Adapt `config.test.js`, `compatible.js`, `endpoint.js`, `catalog.js`, installed loader checks,
+- [x] Adapt `config.test.js`, `compatible.js`, `endpoint.js`, `catalog.js`, installed loader checks,
   installer/path fixtures and SDK acceptance consumers to resolved profile directories. Preserve
   compatible serialization, poisoned-catalog controls and existing refusal evidence.
-- [ ] Implement the bounded legacy transition/removal described below, then update stable owners.
-- [ ] Run both platform matrices sequentially, inspect every changed file/final diff, and verify
+- [x] Implement the bounded legacy transition/removal described below, then update stable owners.
+- [x] Run both platform matrices sequentially, inspect every changed file/final diff, and verify
   no changes to private input, secret files, unrelated work or Git index.
 
 ## Test-first and verification plan
@@ -335,7 +348,7 @@ make test
 
 Use native Windows Python equivalents there; WSL-only installer skips are documented gaps,
 not Windows proof. Run WSL and Windows sequentially because fixtures share scratch names.
-Exercise the updated installed-loader route from [native verification](../agents/tests/providers/pi/README.md)
+Exercise the updated installed-loader route from [native verification](../../agents/tests/providers/pi/README.md)
 for both profile roots with synthetic homes; do not reuse real auth state. Include fresh disabled
 install, adding/selecting another profile without runtime reacquisition, interrupted provisioning,
 legacy cleanup and uninstall with sessions/foreign sentinels. No live cutover or paid smoke is
@@ -347,12 +360,12 @@ necessary to prove this local-state defect. Check docs/relative links with exist
   with native profile scope, A2–A3 consequences, shared-history/resume connection semantics,
   package-inspection behavior and transition procedure. Do not claim this proposed behavior
   in stable docs before implementation; the shell record's executable shape belongs in code.
-- **Permission owner:** [Pi permissions](../agents/providers/pi/permissions/README.md), only the
+- **Permission owner:** [Pi permissions](../../agents/providers/pi/permissions/README.md), only the
   new protected-path responsibility if explanation is needed; executable shapes stay in code.
-- **Verification owner:** [Pi verification](../agents/tests/providers/pi/README.md), replace the
+- **Verification owner:** [Pi verification](../../agents/tests/providers/pi/README.md), replace the
   auth-loss success assertion with positive isolation evidence and the native negative control.
-- **Other consumers:** [Pi provider](../agents/providers/pi/README.md) and
-  [local configuration](../agents/configuration.md) change only their affected install/removal
+- **Other consumers:** [Pi provider](../../agents/providers/pi/README.md) and
+  [local configuration](../../agents/configuration.md) change only their affected install/removal
   consequences and link to the runtime owner. No new architecture document or router is needed.
 - **Duplication avoided:** the two sequential-session explanations above are current duplicate
   statements to remove together. The separate optional-plugin/image-budget todo is independent;
@@ -422,3 +435,59 @@ billing or production rollout follows from this proof.
   These fixtures used no real keys or provider requests; proposed managed behavior remains unimplemented.
   Documentation conformance passed all 11 tests; diff whitespace and plan structure checks passed.
 - **Authority:** D1–D2 and A1–A3 unchanged. Reviewer text supplies evidence, not implementation approval.
+
+
+### 2026-11-20 — Approved implementation and verification
+
+- **Authority:** D3 added; supersedes D1. A1–A3 resolved by D3.
+- **Implemented:** one persistent native directory per selected profile; native local-package
+  registration, canonical instruction links, shared-history links, exact-target cleanup, metadata-only
+  package inspection, optional-thinking-safe shell records and expanded credential-path guards.
+  Ordinary launches preserve legacy shared projections; explicit lifecycle reapplication retires
+  unchanged owned legacy entries. Per-profile preferences and retired ownership records survive removal.
+- **Red evidence:** the new scoped-profile test failed because selecting a second provider replaced
+  the first profile's auth bytes. The new guard test allowed nested profile auth reads before the fix.
+  Three initial scope cases also exposed missing inspection/provisioning behavior. The unchanged
+  low-level shared-directory path remains the installed-SDK credential-loss negative control.
+- **Green focused evidence:** 24 configuration cases are covered: the WSL boundary suite passed its
+  initial 22 cases and two later legacy/refusal cases passed separately; the final Windows Python
+  boundary wrapper includes all 24. WSL `test_gate.py` passed 9 cases. Three focused installer cases
+  and both release-hook cases affected by the new neutral fixture example passed. Node syntax,
+  shell syntax, documentation conformance (11 cases) and diff whitespace checks passed.
+- **Installed Pi 1.5.2, both platforms:** `compatible.js <installed-pi-cli>` passed 16 refusal cases,
+  both thinking modes, three retained isolated runtimes/four isolation requests and two loaded
+  instruction/skill/guard checks. The shared-directory auth-loss control still discriminates the defect.
+  `endpoint.js <installed-pi-cli>` and its `endpoint-profiles.json` variant each passed two-live-process
+  isolation, endpoint/key matching, native reasoning serialization, refusal and shared-history resume.
+  `catalog.js` normal and `unprojected-control` passed cached/refreshed-catalog and clamping controls.
+  All credentials and provider transports were synthetic; no external provider request was required.
+- **Real local lifecycle smoke:** from a disposable case-sensitive source/home, actual
+  `make install PROVIDER=pi PLATFORM=host`, installed `pi-sot --version`, unconfigured refusal,
+  two configured installed-launcher requests and `make uninstall PROVIDER=pi PLATFORM=host` passed.
+  The existing pinned runtime was borrowed without acquisition or prefix modification. History and
+  foreign sentinels survived; source/private inputs and synthetic homes were restored/removed.
+- **Broad verification:** working-checkout `make check` passed. The first WSL `make test` completed
+  293 tests, with 4 failures/7 skips: the ESM acceptance stub and neutral Windows-path example caused
+  three failures and were corrected/proven green through focused checks. The fourth is unrelated:
+  the mounted volume cannot represent the release test's case-distinct filenames (a two-file
+  control realizes one file). An admitted-source snapshot on a case-sensitive filesystem passed
+  `make check` and completed 293 tests with 1 failure/7 skips; the remaining existing Codex Windows
+  command-shim case cannot shut down its native server through that UNC source path. That case
+  passed in the drive-mounted run. Pi production bytes matched the snapshot exactly.
+- **Native Windows broad verification:** the initial direct Windows-Python invocation selected WSL
+  Bash and was invalid as native-shell acceptance. The corrected native Git Bash invocation of
+  Windows Python's `unittest discover` completed all 293 tests successfully, with 67 documented
+  platform skips. No third broad WSL attempt was made; the two filesystem-specific cases were not
+  absorbed into this Pi change.
+- **Review:** the final diff stays in Pi owners, their direct test consumers and the named stable
+  documentation. No Pi fork, new dependency, provider alias, daemon, secret copy or new session index
+  was added. Live reapplication remains outside this completed local implementation. The broader WSL
+  suite is not claimed wholly green; the bounded Pi implementation and both native runtime routes
+  are verified.
+- **Final consumer review:** added an explicit SDK-entrypoint environment assertion; before the fix,
+  `run.sh` passed the selected directory as data but left `PI_CODING_AGENT_DIR` unset/inherited.
+  The focused SOT-only regression failed on that missing environment value. The entrypoint now
+  exports the same validated directory before dispatch, so SDK helpers and credential-path guards
+  receive the selected view. The exact focused regression (`node --test --test-name-pattern=SOT-only
+  agents/tests/providers/pi/config.test.js`) passed on WSL and native Windows. This changed no
+  connection selection or paid-test budget; no additional broad suite was needed for that export.

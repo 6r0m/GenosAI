@@ -4,6 +4,7 @@ import path from 'node:path';
 import {createRequire} from 'node:module';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {configure} from '../../../providers/pi/runtime/configure.js';
+import {spawnSync} from 'node:child_process';
 
 const cli=path.resolve(process.argv[2]);
 const packageDir=path.resolve(path.dirname(cli),'../..');
@@ -113,7 +114,35 @@ try {
  await configure({...options,op:'uninstall'});
  assert.deepEqual(read('models.json').providers,{foreign});
  assert.ok(fs.existsSync(path.join(root,profile.credential)));
- console.log(JSON.stringify({platform:process.platform,version:expected,refusals,modes,ownedCleanup:true,retainedRuntimeAuthRemoved:true,networkRequests:0}));
+ const scoped=path.join(root,'scoped');
+ fs.writeFileSync(path.join(root,'secrets/second.key'),'synthetic-second-key');
+ const connections={alpha:profile,beta:{provider:'deepseek',model:'deepseek-flash',credential:profile.credential},gamma:{...profile,credential:'secrets/second.key',endpoint:'http://127.0.0.1:43211/v1'}};
+ const scopedProfiles={active:'alpha',profiles:connections},retained=[];
+ for(const profileId of Object.keys(connections)) {
+  const selected=await configure({...options,dir:scoped,profiles:scopedProfiles,profileId,profileScope:true});
+  const runtime=await ModelRuntime.create({authPath:path.join(selected.agentDir,'auth.json'),modelsPath:path.join(selected.agentDir,'models.json'),allowModelNetwork:false,refreshOnCreate:false});
+  const entry=connections[profileId],model=runtime.getModel(entry.provider,entry.model);
+  assert.ok(model);retained.push({profileId,runtime,model,agentDir:selected.agentDir});
+ }
+ for(const {profileId,runtime,model} of [...retained,retained[0]]) {
+  const entry=connections[profileId],key=profileId==='gamma'?'synthetic-second-key':'synthetic-compatible-key';
+  assert.ok((await runtime.getAuth(model))?.auth.apiKey===key,'retained runtime must resolve its own synthetic credential');
+  let calls=0;
+  const response=await runtime.completeSimple(model,{messages:[{role:'user',content:'synthetic isolation',timestamp:0}]},{maxTokens:100,maxRetries:0,fetch:async(input,init)=>{
+   calls++;const url=typeof input==='string'||input instanceof URL?String(input):input.url;
+   assert.equal(url,model.baseUrl.replace(/\/$/,'')+'/chat/completions');
+   assert.ok(new Headers(init.headers).get('authorization')==='Bearer '+key,'request must retain its synthetic credential');
+   const chunk={id:'isolated',object:'chat.completion.chunk',created:0,model:entry.model,choices:[{index:0,delta:{role:'assistant',content:'ok'},finish_reason:'stop'}]};
+   return new Response('data: '+JSON.stringify(chunk)+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});
+  }});
+  assert.equal(response.stopReason,'stop',response.errorMessage);assert.equal(calls,1);
+ }
+ for(const {agentDir} of retained.slice(0,2)) {
+  const check=spawnSync(process.execPath,[fileURLToPath(new URL('./native.js',import.meta.url)),path.join(packageDir,'dist/index.js'),path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..'),agentDir],{env:{...process.env,PI_CODING_AGENT_DIR:agentDir,PI_OFFLINE:'1',PI_TELEMETRY:'0'},encoding:'utf8',timeout:30000});
+  assert.equal(check.status,0,check.stdout+check.stderr);
+ }
+ await configure({...options,dir:scoped,op:'uninstall',profileScope:true});
+ console.log(JSON.stringify({platform:process.platform,version:expected,refusals,modes,ownedCleanup:true,retainedRuntimeAuthRemoved:true,isolatedRetainedRuntimes:3,isolatedRequests:4,guardedProfileLoaders:2,networkRequests:0}));
 } finally {
  globalThis.fetch=nativeFetch;
  fs.rmSync(root,{recursive:true,force:true});

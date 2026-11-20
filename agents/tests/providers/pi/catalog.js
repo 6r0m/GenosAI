@@ -40,9 +40,9 @@ try {
  fs.mkdirSync(path.join(root,'secrets'));
  fs.writeFileSync(path.join(root,'secrets/synthetic.key'),'synthetic-catalog-key');
  for(const endpoint of ['', 'http://127.0.0.1:43210/v1']) {
-  const dir=path.join(root,endpoint?'override':'native');
+  const base=path.join(root,endpoint?'override':'native');
   const profiles={active:'selected',profiles:{selected:{provider:'deepseek',model:bundled.id,credential:'secrets/synthetic.key',thinking:'max',...(endpoint?{endpoint}:{})}}};
-  await configure({op:'install',root,dir,profiles,cli,expected});
+  const {agentDir:dir}=await configure({op:'install',root,dir:base,profiles,cli,expected,profileScope:true});
   const modelsFile=path.join(dir,'models.json');
   if(control&&fs.existsSync(modelsFile)) {
    const data=JSON.parse(fs.readFileSync(modelsFile,'utf8'));

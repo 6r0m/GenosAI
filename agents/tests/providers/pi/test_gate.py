@@ -22,6 +22,17 @@ def call(tool, value, cwd=CWD, env=None):
 
 
 class PiGate(unittest.TestCase):
+    def test_profile_auth_paths_are_protected(self):
+        for path in ['~/.pi/agent/profiles/alpha/auth.json',
+                     r'C:\Users\x\.pi\agent\profiles\beta\auth.json']:
+            self.expect('read', path, False)
+            self.expect('bash', 'cat ' + path.replace('\\', '/'), False)
+        base = str(ROOT / 'synthetic-agent')
+        env = dict(os.environ, PI_CODING_AGENT_DIR=os.path.join(base, 'profiles', 'alpha'))
+        for profile in ['alpha', 'beta']:
+            self.expect('read', os.path.join(base, 'profiles', profile, 'auth.json'), False, env=env)
+        self.expect('read', os.path.join(base, 'docs', 'auth-format.md'), True, env=env)
+
     def expect(self, tool, value, allow, cwd=CWD, env=None):
         result = call(tool, value, cwd, env)
         self.assertEqual(result.returncode, 0, result.stderr)

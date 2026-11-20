@@ -25,7 +25,7 @@
 | [endpoint-profiles.json](endpoint-profiles.json) | synthetic configuration with arbitrary profile/provider IDs, both compatible APIs and a different active selection |
 | [Native catalog fixture](profiles.json) | synthetic primary/secondary selections and generic credential references |
 | [catalog.js](catalog.js) | selected native endpoint/effort survive newer cached and refreshed catalogs; unprojected control demonstrates native clamping and route drift |
-| [compatible.js](compatible.js) | native custom-model schemas, transport/replay, owned cleanup and retained-runtime credential loss after shared profile switching |
+| [compatible.js](compatible.js) | native custom-model schemas, transport/replay, profile isolation, loaded guards/skills and shared-projection failure control |
 | [native.js](native.js) | installed SDK loading, exactly seven SOT skills, instruction sources and healthy permission refusal; no model call |
 | [transport.js](transport.js) | installed Pi against a recording local provider with synthetic credentials |
 
@@ -140,10 +140,15 @@ node agents/tests/providers/pi/compatible.js <installed-pi-cli>
 ```
 
 The test uses synthetic credentials and transport, validates native schemas and unsupported levels,
-and inspects serialized images, tool results and preserved reasoning. It does not contact Tencent.
-It also retains an already loaded native runtime while the shared projector selects another provider:
-the earlier runtime loses access to its removed synthetic credential. This proves why profile
-switching requires sequential sessions rather than promising concurrent isolation.
+and inspects serialized images, tool results and preserved reasoning. It retains three isolated native
+runtimes and verifies four requests with correct keys/endpoints, including the same provider/model
+under two profiles. The shared-directory negative control demonstrates credential loss. Two profile
+directories also run the installed loader/permission check. No provider service is contacted.
+
+The endpoint acceptance keeps one real managed CLI process at a local fixture barrier while a second
+profile completes. Releasing the first then proves its subsequent authentication still uses its own
+key and endpoint. Shared-history discovery and resuming through another profile are checked separately;
+the connection semantics belong to [the runtime owner](../../../providers/pi/runtime/README.md).
 
 ## Direct-provider acceptance
 

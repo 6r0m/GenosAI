@@ -23,5 +23,7 @@ local_json="$(bash "$AI_ROOT/permissions/run-guard.sh" ../../config.py pi --plat
 # The profile owner validates the connection schema and pinned capability without displaying credentials.
 config_args=("$task_dir" "$task_repo" "$task_cli" "${PI_PACKAGE##*@}")
 resolved="$("$task_node" "$AI_ROOT/providers/pi/runtime/configure.js" install "${config_args[@]}" --local <<<"$local_json")" || exit 1
-IFS=$'\t' read -r profile provider model thinking <<<"$resolved"
+IFS=$'\t' read -r profile provider model task_dir thinking <<<"$resolved"
+[[ -n "$profile" && -n "$provider" && -n "$model" && -n "$task_dir" ]] || { echo 'error: incomplete Pi selection' >&2; exit 1; }
+export PI_CODING_AGENT_DIR="$task_dir"
 exec "$task_node" "$HERE/live.js" "$task_index" "$task_root" "$task_fixture" "$task_dir" "$profile" "$provider" "$model" "$thinking"

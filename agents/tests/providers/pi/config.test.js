@@ -16,6 +16,97 @@ function fixture(t) {
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return opts;
 }
 const read=(o,file)=>JSON.parse(fs.readFileSync(path.join(o.dir,file),'utf8'));
+function snapshotTree(dir) {
+ const output={};
+ for(const name of fs.readdirSync(dir).sort()){const file=path.join(dir,name),info=fs.lstatSync(file);output[name]=info.isSymbolicLink()?{link:fs.readlinkSync(file)}:info.isDirectory()?snapshotTree(file):fs.readFileSync(file,'utf8');}
+ return output;
+}
+
+function scopedFixture(t) {
+ const o=fixture(t),prefix=path.join(o.root,'runtime'),pkg=path.join(prefix,'node_modules/@earendil-works/pi-coding-agent');
+ const cli=path.join(pkg,'dist/bundle/cli.js');fs.mkdirSync(path.dirname(cli),{recursive:true});
+ fs.writeFileSync(cli,"if(process.env.PI_TEST_LOCAL_INSTALL_FAIL)process.exit(7);const fs=require('fs'),path=require('path'),dir=process.env.PI_CODING_AGENT_DIR,file=path.join(dir,'settings.json'),data=fs.existsSync(file)?JSON.parse(fs.readFileSync(file)):{};data.packages=(data.packages??[]).filter(x=>x!==process.argv[3]);if(process.argv[2]==='install')data.packages.push(process.argv[3]);fs.writeFileSync(file,JSON.stringify(data));");
+ const catalog=path.join(prefix,'node_modules/@earendil-works/pi-ai/dist/providers/data');fs.mkdirSync(catalog,{recursive:true});
+ for(const provider of ['deepseek','other'])fs.writeFileSync(path.join(catalog,provider+'.json'),JSON.stringify({models:{a:{id:'a',api:'openai-completions'},b:{id:'b',api:'openai-completions'}}}));
+ return {...o,cli,profileScope:true};
+}
+test('scoped profiles preserve earlier provider and same-provider credential references',async t=>{
+ const o=scopedFixture(t),profiles=one();
+ profiles.profiles.second={provider:'other',model:'b',credential:'secrets/b.key'};
+ profiles.profiles.third={provider:'deepseek',model:'a',credential:'secrets/b.key'};
+ const first=await configure({...o,profiles,profileScope:true});
+ const firstDir=first.agentDir??o.dir;
+ const before=fs.readFileSync(path.join(firstDir,'auth.json'),'utf8');
+ await configure({...o,profiles,profileId:'second',profileScope:true});
+ assert.equal(fs.readFileSync(path.join(firstDir,'auth.json'),'utf8'),before,'another provider must not remove live profile auth');
+ await configure({...o,profiles,profileId:'third',profileScope:true});
+ assert.equal(fs.readFileSync(path.join(firstDir,'auth.json'),'utf8'),before,'same provider must not replace another profile key');
+ assert.equal(first.agentDir,path.join(o.dir,'profiles','first'));
+});
+test('scoped inspection and refusal never provision a directory or require a key',async t=>{
+ const o=scopedFixture(t),before=fs.readdirSync(o.dir);
+ await assert.rejects(configure({...o,op:'inspect'}),/not initialized/);
+ assert.deepEqual(fs.readdirSync(o.dir),before);
+ const first=await configure(o);fs.unlinkSync(path.join(o.root,'secrets/a.key'));
+ assert.equal((await configure({...o,op:'inspect'})).agentDir,first.agentDir);
+ const outside=path.join(o.root,'outside');fs.mkdirSync(outside);
+ fs.symlinkSync(outside,path.join(o.dir,'profiles/escape'),process.platform==='win32'?'junction':'dir');
+ await assert.rejects(configure({...o,profiles:{active:'escape',profiles:{escape:{provider:'deepseek',model:'a',credential:'secrets/b.key'}}}}),/symbolic|link|escape/);
+ assert.deepEqual(fs.readdirSync(outside),[]);
+});
+test('scoped cleanup removes exact session links while preserving history and foreign state',async t=>{
+ const o=scopedFixture(t),first=await configure(o),dir=first.agentDir??o.dir;
+ assert.ok(fs.lstatSync(path.join(dir,'sessions')).isSymbolicLink());
+ const sentinel=path.join(o.dir,'sessions/history');fs.writeFileSync(sentinel,'synthetic-history');
+ fs.writeFileSync(path.join(dir,'foreign.txt'),'keep');
+ await configure({...o,op:'uninstall'});
+ assert.equal(fs.readFileSync(sentinel,'utf8'),'synthetic-history');
+ assert.equal(fs.readFileSync(path.join(dir,'foreign.txt'),'utf8'),'keep');
+ assert.equal(fs.existsSync(path.join(dir,'sessions')),false);
+ await assert.rejects(configure({...o,op:'inspect'}),/not initialized/);
+ await configure(o);
+ fs.unlinkSync(path.join(dir,'sessions'));
+ const foreign=path.join(o.root,'foreign-history');fs.mkdirSync(foreign);fs.writeFileSync(path.join(foreign,'sentinel'),'keep');
+ fs.symlinkSync(foreign,path.join(dir,'sessions'),process.platform==='win32'?'junction':'dir');
+ const before=snapshotTree(dir);
+ await assert.rejects(configure({...o,op:'uninstall'}),/tampered|foreign/);
+ assert.deepEqual(snapshotTree(dir),before);
+ assert.equal(fs.readFileSync(path.join(foreign,'sentinel'),'utf8'),'keep');
+});
+test('scoped failed provisioning retries and runtime-free removal preserves native preferences',async t=>{
+ const o=scopedFixture(t);
+ const previous=process.env.PI_TEST_LOCAL_INSTALL_FAIL;process.env.PI_TEST_LOCAL_INSTALL_FAIL='1';
+ try {await assert.rejects(configure(o),/package install failed/);}
+ finally {if(previous===undefined)delete process.env.PI_TEST_LOCAL_INSTALL_FAIL;else process.env.PI_TEST_LOCAL_INSTALL_FAIL=previous;}
+ const dir=path.join(o.dir,'profiles/first');assert.equal(fs.existsSync(path.join(dir,'auth.json')),false);
+ await configure(o);
+ const file=path.join(dir,'settings.json'),settings=JSON.parse(fs.readFileSync(file));settings.theme='synthetic-theme';settings.packages.push('npm:synthetic-foreign');fs.writeFileSync(file,JSON.stringify(settings));
+ await configure({...o,op:'uninstall',cli:undefined});
+ assert.deepEqual(JSON.parse(fs.readFileSync(file)),{...settings,packages:['npm:synthetic-foreign']});
+ await configure(o);assert.equal(JSON.parse(fs.readFileSync(file)).theme,'synthetic-theme');
+});
+test('scoped launch preserves legacy state and explicit retirement removes only owned entries',async t=>{
+ const o=scopedFixture(t);
+ const foreign={foreign:{type:'api_key',key:'synthetic-foreign'}};
+ fs.writeFileSync(path.join(o.dir,'auth.json'),JSON.stringify(foreign));
+ await configure({...o,profileScope:false});
+ const legacy=Object.fromEntries(['auth.json','agents-sot-state.json'].map(name=>[name,fs.readFileSync(path.join(o.dir,name),'utf8')]));
+ await configure(o);
+ for(const [name,bytes] of Object.entries(legacy))assert.equal(fs.readFileSync(path.join(o.dir,name),'utf8'),bytes);
+ await configure({...o,op:'retire'});
+ assert.deepEqual(read(o,'auth.json'),foreign);
+ assert.equal(fs.existsSync(path.join(o.dir,'agents-sot-state.json')),false);
+ assert.ok(fs.existsSync(path.join(o.dir,'profiles/first/auth.json')));
+});
+test('scoped invalid second profile leaves the existing profile and source unchanged',async t=>{
+ const o=scopedFixture(t),selected=await configure(o),before=snapshotTree(selected.agentDir);
+ for(const entry of [{provider:'deepseek',model:'a',credential:'secrets/missing.key'},{provider:'deepseek',model:'absent',credential:'secrets/b.key'}]) {
+  const profiles={...o.profiles,profiles:{...o.profiles.profiles,bad:entry}},source=JSON.stringify(profiles);
+  await assert.rejects(configure({...o,profiles,profileId:'bad'}));
+  assert.deepEqual(snapshotTree(selected.agentDir),before);assert.equal(JSON.stringify(profiles),source);
+  assert.equal(fs.existsSync(path.join(o.dir,'profiles/bad')),false);
+ }
+});
 test('external credential owner confines references and survives validation, refusal and removal',async t=>{
  const o=fixture(t),secretRoot=path.join(o.root,'private credentials');fs.mkdirSync(secretRoot);
  const key=path.join(secretRoot,'a.key');fs.writeFileSync(key,'synthetic-external-key');
@@ -172,13 +263,12 @@ test('invalid native projection shapes refuse without mutation',async t=>{
 });
 test('concurrent native projections keep one consistent owner',async t=>{
  const o=fixture(t);
- const source=fileURLToPath(new URL('../../../providers/pi/runtime/configure.js',import.meta.url));
- // Two copied runtimes with different active profiles alternate writers, as separate processes.
+ // The low-level shared-directory control exercises the projector's writer lock.
  const scripts=[['deepseek','a'],['fixture','b']].map(([provider,model],index)=>{
   const runtime=path.join(o.root,'runtime-'+index);fs.mkdirSync(runtime,{recursive:true});
-  fs.copyFileSync(source,path.join(runtime,'configure.js'));
+  fs.writeFileSync(path.join(runtime,'writer.mjs'),`import {configure} from ${JSON.stringify(new URL('../../../providers/pi/runtime/configure.js',import.meta.url).href)};import fs from 'node:fs';await configure({op:'install',dir:process.argv[3],root:process.argv[4],profiles:JSON.parse(fs.readFileSync(new URL('./profiles.json',import.meta.url)))});`);
   fs.writeFileSync(path.join(runtime,'profiles.json'),JSON.stringify({active:'first',profiles:{first:{provider,model,credential:'secrets/'+model+'.key',endpoint:'http://127.0.0.1:9999',api:'openai-completions',...(index===1?{compatibleModel:custom().compatibleModel}:{})}}}));
-  return path.join(runtime,'configure.js');
+  return path.join(runtime,'writer.mjs');
  });
  await Promise.all(Array.from({length:4},(_,i)=>new Promise((resolve,reject)=>{
   const child=spawn(process.execPath,[scripts[i%2],'install',o.dir,o.root]);
@@ -210,7 +300,9 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  const packageDir=path.join(prefix,'node_modules/@earendil-works/pi-coding-agent');
  const cli=path.join(packageDir,'dist/bundle/cli.js');fs.mkdirSync(path.dirname(cli),{recursive:true});
  const record=path.join(repo,'dispatch.json');
- fs.writeFileSync(cli,"const fs=require('fs');fs.writeFileSync(process.env.PI_TEST_RECORD,JSON.stringify(process.argv.slice(2)));fs.writeFileSync(process.env.PI_TEST_RECORD+'.dir',process.env.PI_CODING_AGENT_DIR??'')");
+ fs.writeFileSync(cli,"const fs=require('fs'),path=require('path');if(process.argv[2]==='install'||process.argv[2]==='remove'){const f=path.join(process.env.PI_CODING_AGENT_DIR,'settings.json');fs.writeFileSync(f,JSON.stringify({packages:process.argv[2]==='install'?[process.argv[3]]:[]}));}else{fs.writeFileSync(process.env.PI_TEST_RECORD,JSON.stringify(process.argv.slice(2)));fs.writeFileSync(process.env.PI_TEST_RECORD+'.dir',process.env.PI_CODING_AGENT_DIR??'');}");
+ fs.writeFileSync(path.join(repo,'ai/agents/AGENTS.md'),'Synthetic instructions');
+ fs.copyFileSync(fileURLToPath(new URL('../../../package.json',import.meta.url)),path.join(repo,'ai/agents/package.json'));
  const capability=path.join(prefix,'node_modules/@earendil-works/pi-ai/dist');fs.mkdirSync(path.join(capability,'providers/data'),{recursive:true});
  const pin=/^PI_PACKAGE='[^']*@([^']+)'/m.exec(fs.readFileSync(configFile,'utf8'))[1];
  const packageFile=path.join(packageDir,'package.json');
@@ -226,14 +318,14 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  writeProfiles('deepseek-direct',{'deepseek-direct':first,alternate});
  const launch=(...args)=>spawnSync(resolveShell(),['-c',win?'export HOME="$(cygpath -u "$PI_TEST_HOME")"; exec bash "$PI_TEST_LAUNCH" "$@"':'exec bash "$PI_TEST_LAUNCH" "$@"','pi-launch-test',...args],{env:{...process.env,HOME:home,PI_TEST_HOME:home,PI_TEST_LAUNCH:path.join(runtime,'launch.sh').replaceAll('\\','/'),PI_TEST_RECORD:record},encoding:'utf8'});
  let result=launch();assert.equal(result.status,0,result.stderr);
- assert.equal(path.resolve(fs.readFileSync(record+'.dir','utf8')),path.join(home,'.pi/agent'),'native startup must receive the SOT agent directory');
+ assert.equal(path.resolve(fs.readFileSync(record+'.dir','utf8')),path.join(home,'.pi/agent/profiles/deepseek-direct'),'native startup must receive the SOT agent directory');
  assert.deepEqual(JSON.parse(fs.readFileSync(record)),['--provider','deepseek','--model','deepseek-flash','--thinking','max']);
  const policyBefore=fs.readFileSync(profileFile,'utf8');
  for(const selector of [['--profile','alternate'],['--profile=alternate']]) {
   result=launch(...selector,'-p','literal prompt','--thinking','low');assert.equal(result.status,0,result.stderr);
   assert.deepEqual(JSON.parse(fs.readFileSync(record)),['--provider',alternate.provider,'--model',alternate.model,'--thinking','high','-p','literal prompt','--thinking','low']);
   assert.equal(fs.readFileSync(profileFile,'utf8'),policyBefore);
-  const generated=JSON.parse(fs.readFileSync(path.join(home,'.pi/agent/models.json'))).providers;
+  const generated=JSON.parse(fs.readFileSync(path.join(home,'.pi/agent/profiles/alternate/models.json'))).providers;
   assert.deepEqual(Object.keys(generated),[alternate.provider]);
   assert.equal(generated[alternate.provider].baseUrl,alternate.endpoint);
  }
@@ -259,7 +351,7 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  result=launch();assert.equal(result.status,0,result.stderr);
  assert.deepEqual(JSON.parse(fs.readFileSync(record)),['--provider','deepseek','--model','deepseek-flash','--thinking','max']);
  assert.equal(fs.readFileSync(profileFile,'utf8'),policyBefore);
- const snapshot=()=>Object.fromEntries(fs.readdirSync(path.join(home,'.pi/agent')).map(name=>[name,fs.readFileSync(path.join(home,'.pi/agent',name),'utf8')]));
+ const snapshot=()=>snapshotTree(path.join(home,'.pi/agent'));
  const beforeSelection=snapshot(),beforeDispatch=fs.readFileSync(record,'utf8');
  for(const args of [['--profile'],['--profile='],['--profile',''],['--profile','../bad'],['--profile','unknown'],['--profile','constructor'],['--profile','--help'],['--profile','alternate','--profile','deepseek-direct'],['--profile','unknown','list'],['--profile','alternate','auth']]) {
   result=launch(...args);assert.notEqual(result.status,0,JSON.stringify(args));
@@ -269,6 +361,15 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  }
  result=launch('--profile','alternate','list');assert.equal(result.status,0,result.stderr);
  assert.deepEqual(JSON.parse(fs.readFileSync(record)),['list']);assert.deepEqual(snapshot(),beforeSelection);
+ assert.equal(path.resolve(fs.readFileSync(record+'.dir','utf8')),path.join(home,'.pi/agent/profiles/alternate'));
+ const alternateKey=path.join(repo,'secrets/b.key');fs.renameSync(alternateKey,alternateKey+'.hidden');
+ try {result=launch('--profile','alternate','list');assert.equal(result.status,0,result.stderr);}
+ finally {fs.renameSync(alternateKey+'.hidden',alternateKey);}
+ const expanded=JSON.parse(policyBefore);expanded.profiles.uninitialized={...first,credential:'secrets/missing.key'};
+ fs.writeFileSync(profileFile,JSON.stringify(expanded));
+ result=launch('--profile','uninitialized','list');assert.notEqual(result.status,0);assert.match(result.stderr,/not initialized/);
+ assert.equal(fs.existsSync(path.join(home,'.pi/agent/profiles/uninitialized')),false);
+ assert.deepEqual(snapshot(),beforeSelection);fs.writeFileSync(profileFile,policyBefore);
  for(const args of [['--','--profile','literal'],['--system-prompt','--profile','-p','literal'],['--version'],['--help']]) {
   const beforeInfo=snapshot();
   result=launch(...args);assert.equal(result.status,0,result.stderr);
@@ -277,7 +378,7 @@ test('SOT-only changes select native managed launch on each platform',t=>{
   if(args.length===1)assert.deepEqual(snapshot(),beforeInfo);
  }
  const configScript=path.join(runtime,'configure.js'),ownerSource=fs.readFileSync(configScript,'utf8');
- const selectionAnchor="  const chosen = op === 'uninstall' ? null : resolveProfiles(profiles !== undefined ? profiles : readProfiles(profileFile ?? defaultProfileFile), setup);";
+ const selectionAnchor="  const chosen = op === 'uninstall' ? null : resolveProfiles(options.profiles !== undefined ? options.profiles : readProfiles(options.profileFile ?? defaultProfileFile), setup || op==='inspect');";
  assert.equal(ownerSource.split(selectionAnchor).length,2);
  const racePolicy={...JSON.parse(policyBefore),active:'alternate'};
  const replacement=JSON.parse(JSON.stringify(racePolicy));
@@ -287,15 +388,16 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  const acceptanceDir=path.join(repo,'ai/agents/tests/providers/pi');fs.mkdirSync(acceptanceDir,{recursive:true});
  const acceptanceScript=path.join(acceptanceDir,'run.sh');
  fs.copyFileSync(fileURLToPath(new URL('./run.sh',import.meta.url)),acceptanceScript);
- fs.writeFileSync(path.join(acceptanceDir,'live.js'),"require('fs').writeFileSync(process.env.PI_TEST_RECORD,JSON.stringify(process.argv.slice(-4)))");
+ fs.writeFileSync(path.join(acceptanceDir,'live.js'),"import fs from 'node:fs';fs.writeFileSync(process.env.PI_TEST_RECORD,JSON.stringify(process.argv.slice(-4)));fs.writeFileSync(process.env.PI_TEST_RECORD+'.dir',process.env.PI_CODING_AGENT_DIR??'')");
  const acceptance=()=>spawnSync(resolveShell(),['-c',win?'export HOME="$(cygpath -u "$PI_TEST_HOME")"; exec bash "$PI_TEST_ACCEPTANCE" "$PI_TEST_FIXTURE"':'exec bash "$PI_TEST_ACCEPTANCE" "$PI_TEST_FIXTURE"'],{env:{...process.env,HOME:home,PI_TEST_HOME:home,PI_TEST_ACCEPTANCE:acceptanceScript.replaceAll('\\','/'),PI_TEST_FIXTURE:path.join(repo,'acceptance-fixture').replaceAll('\\','/'),PI_TEST_RECORD:record},encoding:'utf8'});
  try {
   for(const entry of ['launcher','acceptance']) {
    fs.writeFileSync(profileFile,JSON.stringify(racePolicy));fs.rmSync(readCount,{force:true});
    fs.writeFileSync(configScript,ownerSource.replace(selectionAnchor,selectionAnchor+injected));
    result=entry==='launcher'?launch('--profile','alternate'):acceptance();assert.equal(result.status,0,result.stderr);
-   assert.equal(JSON.parse(fs.readFileSync(path.join(home,'.pi/agent/models.json'))).providers[alternate.provider].baseUrl,alternate.endpoint,'launch must project the endpoint from its one validated snapshot');
-   assert.match(JSON.parse(fs.readFileSync(path.join(home,'.pi/agent/auth.json')))[alternate.provider].key,/b\.key/,'launch must retain the credential from that same snapshot');
+   assert.equal(path.resolve(fs.readFileSync(record+'.dir','utf8')),path.join(home,'.pi/agent/profiles/alternate'),'each consumer must export the same resolved native directory');
+   assert.equal(JSON.parse(fs.readFileSync(path.join(home,'.pi/agent/profiles/alternate/models.json'))).providers[alternate.provider].baseUrl,alternate.endpoint,'launch must project the endpoint from its one validated snapshot');
+   assert.match(JSON.parse(fs.readFileSync(path.join(home,'.pi/agent/profiles/alternate/auth.json')))[alternate.provider].key,/b\.key/,'launch must retain the credential from that same snapshot');
    assert.equal(JSON.parse(fs.readFileSync(readCount)),1,'managed launch must read its profile selection once');
    assert.deepEqual(JSON.parse(fs.readFileSync(record)),entry==='launcher'?['--provider',alternate.provider,'--model',alternate.model,'--thinking',alternate.thinking]:['alternate',alternate.provider,alternate.model,alternate.thinking]);
    assert.equal(fs.readFileSync(profileFile,'utf8'),JSON.stringify(replacement),'only the simulated editor may change the SOT');
@@ -303,26 +405,27 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  } finally {fs.writeFileSync(configScript,ownerSource);fs.writeFileSync(profileFile,policyBefore);}
  writeProfiles('renamed-default',{'renamed-default':first,alternate});
  result=launch();assert.equal(result.status,0,result.stderr);
- assert.equal(JSON.parse(fs.readFileSync(path.join(home,'.pi/agent/agents-sot-state.json'))).profile,'renamed-default','renaming a profile ID must retain ownership of its existing projections');
+ assert.equal(JSON.parse(fs.readFileSync(path.join(home,'.pi/agent/profiles/renamed-default/agents-sot-state.json'))).profile,'renamed-default','renaming a profile ID must retain ownership of its existing projections');
  assert.deepEqual(JSON.parse(fs.readFileSync(record)),['--provider','deepseek','--model','deepseek-flash','--thinking','max']);
  result=launch('--thinking','low');assert.equal(result.status,0,result.stderr);
  assert.deepEqual(JSON.parse(fs.readFileSync(record)),['--provider','deepseek','--model','deepseek-flash','--thinking','max','--thinking','low'],'explicit CLI override stays session-local and wins over the SOT default');
  result=launch('list');assert.equal(result.status,0,result.stderr);
  assert.deepEqual(JSON.parse(fs.readFileSync(record)),['list'],'native package subcommand must remain argv[0]');
+ assert.equal(path.resolve(fs.readFileSync(record+'.dir','utf8')),path.join(home,'.pi/agent/profiles/renamed-default'));
  const managedDir=path.join(home,'.pi/agent');
- const managedBefore=Object.fromEntries(fs.readdirSync(managedDir).map(name=>[name,fs.readFileSync(path.join(managedDir,name),'utf8')]));
+ const managedBefore=snapshotTree(managedDir);
  const dispatchedBefore=fs.readFileSync(record,'utf8');
  for(const command of ['auth','config','install','remove','uninstall','update','mcp']) {
   result=launch(command,'--help');
   assert.notEqual(result.status,0,command+' must refuse before native dispatch');
   assert.match(result.stderr,/managed|SOT/);
   assert.equal(fs.readFileSync(record,'utf8'),dispatchedBefore);
-  assert.deepEqual(Object.fromEntries(fs.readdirSync(managedDir).map(name=>[name,fs.readFileSync(path.join(managedDir,name),'utf8')])),managedBefore);
+  assert.deepEqual(snapshotTree(managedDir),managedBefore);
  }
  writeProfiles('alternate',{'deepseek-direct':first,alternate:{provider:'deepseek',model:'other-model',credential:'secrets/b.key',endpoint:'http://127.0.0.1:9999',api:'openai-completions'}});
  result=launch();assert.equal(result.status,0,result.stderr);
  assert.deepEqual(JSON.parse(fs.readFileSync(record)),['--provider','deepseek','--model','other-model'],'a profile without a thinking level must not force one');
- const dir=path.join(home,'.pi/agent');
+ const dir=path.join(home,'.pi/agent/profiles/alternate');
  assert.equal(JSON.parse(fs.readFileSync(path.join(dir,'models.json'))).providers.deepseek.baseUrl,'http://127.0.0.1:9999');
  assert.match(JSON.parse(fs.readFileSync(path.join(dir,'auth.json'))).deepseek.key,/b\.key/);
  const config=fs.readFileSync(configFile,'utf8');
@@ -330,14 +433,14 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  assert.equal(config.split(anchor).length,2);
  fs.writeFileSync(configFile,config.replace(anchor,'register_provider pi .pi-alternate/agent '));
  result=launch();assert.equal(result.status,0,result.stderr);
- assert.equal(path.resolve(fs.readFileSync(record+'.dir','utf8')),path.join(home,'.pi-alternate/agent'));
- assert.ok(fs.existsSync(path.join(home,'.pi-alternate/agent/auth.json')));
+ assert.equal(path.resolve(fs.readFileSync(record+'.dir','utf8')),path.join(home,'.pi-alternate/agent/profiles/alternate'));
+ assert.ok(fs.existsSync(path.join(home,'.pi-alternate/agent/profiles/alternate/auth.json')));
  const before=fs.readFileSync(record,'utf8');
  writeProfiles('missing',{'deepseek-direct':first});
  assert.notEqual(launch().status,0);assert.equal(fs.readFileSync(record,'utf8'),before);
  writeProfiles('deepseek-direct',{'deepseek-direct':first});
  fs.writeFileSync(packageFile,JSON.stringify({name:'@earendil-works/pi-coding-agent',version:'0.99.1'}));
- const tree=()=>Object.fromEntries(fs.readdirSync(managedDir).map(name=>[name,fs.readFileSync(path.join(managedDir,name),'utf8')]));
+ const tree=()=>snapshotTree(managedDir);
  const managedFresh=tree();
  result=launch();assert.notEqual(result.status,0,'installed version drift must refuse before dispatch');
  assert.match(result.stderr,/does not match managed pin/);

@@ -31,6 +31,17 @@ def secret(path, cwd):
         if any(owner in '/'.join(parts) for owner in
                ['.pi/agent/auth.json', '.codex/auth.json', '.claude/.credentials.json']):
             return True
+        if name == 'auth.json':
+            if '.pi' in parts and 'agent' in parts:
+                return True
+            agent = os.environ.get('PI_CODING_AGENT_DIR')
+            if agent:
+                base = resolve(native(agent)).replace('\\', '/').lower()
+                if base.rsplit('/', 2)[-2] == 'profiles':
+                    base = base.rsplit('/', 2)[0]
+                candidate = resolve(value).replace('\\', '/').lower()
+                if candidate == base or candidate.startswith(base.rstrip('/') + '/'):
+                    return True
     return False
 
 
@@ -118,6 +129,10 @@ def probe(cwd):
     samples = [('bash', 'git add -A'), ('bash', 'git push'), ('bash', 'git restore x'),
                ('bash', 'sudo true'), ('bash', 'rm -rf .git'), ('bash', 'rm -rf /opt/pi-absent/x'),
                ('read', 'secrets/pi-absent.key'), ('write', '/etc/pi-absent')]
+    samples.append(('read', '~/.pi/agent/profiles/pi-probe/auth.json'))
+    agent = os.environ.get('PI_CODING_AGENT_DIR')
+    if agent:
+        samples.append(('read', os.path.join(agent, 'auth.json')))
     cases = []
     for tool, value in samples:
         inp = {'command': value} if tool == 'bash' else {'path': value}

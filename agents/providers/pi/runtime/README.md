@@ -93,13 +93,25 @@ To change the persistent default or a route definition, edit `active` and the pr
 optional `endpoint` and `api`) in the ignored local `pi` object. Start a
 new session through `pi-sot` (native Windows also exposes `pi-sot.cmd`). The launcher re-reads the profile,
 reconciles owned native configuration and passes provider/model, the profile's optional startup
-thinking level and the descriptor's native agent directory explicitly to the pinned CLI. An omitted
+thinking level and the selected profile's native agent directory explicitly to the pinned CLI. An omitted
 `thinking` leaves Pi's native default in charge, and an explicit CLI override is session-local.
-Sessions retain their selected model, but use shared authentication/model projections. Finish an
-existing session before launching another profile: switching can remove the credential its next
-generation needs. Concurrent mixed-provider sessions are not isolated by this selector.
+Each used profile has its own native directory beneath the registry-owned base's `profiles/`:
+authentication/model projections, mutable native settings, caches and writer lock are isolated.
+Distinct profiles can run concurrently, including the same provider/model with different keys or
+endpoints. Changing one profile's own connection requires restarting that profile's sessions.
+The runtime is installed once. A first profile launch registers the common local package and links
+canonical instructions; later launches verify ownership. File-link permissions must be available on
+Windows; an unavailable canonical link refuses before native dispatch.
+Native preferences are profile-local; base preferences and foreign packages are not copied.
+After a bootstrap failure, fix the reported local prerequisite and rerun the same profile.
+Partial owned provisioning remains recoverable; a failed registration never dispatches the assistant CLI.
 Raw `pi` uses Pi's native defaults instead of this managed route.
-`pi-sot list` preserves native read-only inspection with the command first. Managed launch refuses
+`pi-sot list` inspects the configured active profile; `pi-sot --profile <id> list` inspects that
+profile independently of the default. Inspection does not require its credential file or provision
+missing state: an uninitialized profile refuses with guidance to launch it first. With disabled
+connection defaults, bare `list` inspects the existing base directory. An absent base also refuses.
+The native command stays first. Native temporary read locks leave no persistent artifacts;
+explicit native project-trust decisions retain their ordinary mutation semantics. Managed launch refuses
 native auth, configuration, MCP and package mutations: change the SOT for connections and use the
 shared install/uninstall interfaces for lifecycle operations. Raw `pi` remains the explicitly unmanaged
 route; its writes can cause managed ownership drift and a subsequent managed launch refusal.
@@ -108,9 +120,24 @@ authentication or unsupported protocols need an explicit adapter when a real use
 
 To switch between configured routes, pass the desired profile ID or edit `active` for a persistent
 default, then start a new managed session. Each route keeps its own native provider/model, credential and
-effort together; the projector removes the previous owned route. Profile IDs have no built-in
+effort together; another profile's projections are independent. Profile IDs have no built-in
 meaning; the same schema handles new route entries. Switching does not require an
 installation or a code change, and credentials for inactive routes are not required.
+
+All managed profiles link `sessions/` to the existing base session directory, preserving native
+working-directory grouping and conversation discovery. Native explicit session-location overrides
+retain precedence. History records model selections, not this wrapper's profile identity: resuming
+an A conversation through profile B uses B's connection for the selected model. Select A to use
+A's endpoint/key. There is no session-to-profile index; do not edit one conversation concurrently.
+Pointing `PI_CODING_AGENT_SESSION_DIR` at the parent of the grouped history does not preserve this
+discovery layout and is not installed by the launcher.
+
+Before reapplying the Pi lifecycle to a legacy shared projection, finish its sessions once.
+Normal profile launches leave legacy base auth/models intact. Explicit lifecycle reapplication
+retires only unchanged owned legacy entries after profile provisioning; base foreign state survives.
+Removal visits owned profile records, including retired IDs, without sweeping other directories.
+Session links require the exact expected base-history target; cleanup removes the link/junction
+alone. Tampered links or ownership refuse. Native preferences, history and original keys survive.
 
 ## Native and compatible models
 
@@ -184,8 +211,9 @@ tracked config or logs, and no global API-key environment variable is installed.
 readable regular credential file; validation uses metadata without reading its contents.
 Pi install telemetry is disabled. Provider account budgets remain operator-managed.
 
-`auth.json` and optional `models.json` are projections. A SOT ownership record identifies managed entries;
-switching profiles removes obsolete managed entries. Foreign entries, edited managed values, malformed
+Each profile's `auth.json` and optional `models.json` are projections. A SOT ownership record identifies
+managed entries and common-resource references. Selecting another profile leaves these files alone.
+Reconfiguring the same profile replaces its obsolete owned entries. Foreign entries, edited managed values, malformed
 JSON and collisions are never overwritten. A bounded directory lock coordinates concurrent writers;
 validated files are promoted individually through atomic replacement. If a write fails between files,
 inspect the reported ownership drift before repairing it; this is not a multi-file transaction.

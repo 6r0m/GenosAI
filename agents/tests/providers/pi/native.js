@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {pathToFileURL} from 'node:url';
 const [index,root,agentDir]=process.argv.slice(2);
-const {DefaultResourceLoader,SettingsManager,SessionManager,createAgentSession}=await import(pathToFileURL(index));
+const {DefaultResourceLoader,SettingsManager,SessionManager,ModelRuntime,createAgentSession}=await import(pathToFileURL(index));
 const loader=new DefaultResourceLoader({cwd:root,agentDir,settingsManager:SettingsManager.create(root,agentDir)});
 await loader.reload();
 assert.deepEqual(loader.getExtensions().errors,[]);
@@ -15,7 +15,8 @@ assert.ok(fs.existsSync(path.resolve(path.dirname(architect.filePath),'../.share
 const instructions=loader.getAgentsFiles().agentsFiles;
 assert.ok(instructions.some(f=>path.resolve(f.path)===path.resolve(agentDir,'AGENTS.md')));
 assert.ok(instructions.some(f=>path.resolve(f.path)===path.resolve(root,'AGENTS.md')));
-const {session}=await createAgentSession({cwd:root,agentDir,resourceLoader:loader,sessionManager:SessionManager.inMemory(root)});
+const modelRuntime=await ModelRuntime.create({authPath:path.join(agentDir,'auth.json'),modelsPath:path.join(agentDir,'models.json'),allowModelNetwork:false,refreshOnCreate:false});
+const {session}=await createAgentSession({cwd:root,agentDir,modelRuntime,resourceLoader:loader,sessionManager:SessionManager.inMemory(root)});
 const errors=[],notices=[];
 await session.bindExtensions({onError:e=>errors.push(e),uiContext:{...session.extensionRunner.createContext().ui,notify:(message)=>notices.push(message)}});
 const command=session.extensionRunner.getCommand('guard-status');assert.ok(command);

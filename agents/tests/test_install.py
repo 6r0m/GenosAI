@@ -59,7 +59,7 @@ class InstallerWiring(unittest.TestCase):
         # The copy: what install.sh needs, with the untracked cache left out and a stand-in planted.
         self.copy = os.path.join(self.tmp, "repo", "ai", "agents")
         os.makedirs(self.copy)
-        for name in ("AGENTS.md", "agent-ignore", "config.py"):
+        for name in ("AGENTS.md", "agent-ignore", "config.py", "package.json"):
             shutil.copy2(os.path.join(ST.AGENTS, name), self.copy)
         secret_dir = os.path.join(self.tmp, 'repo/secrets')
         os.makedirs(secret_dir)
@@ -391,13 +391,15 @@ class ProviderLifecycle(InstallerWiring):
         self.prepare_runtime()
         agent = os.path.join(self.home, '.pi/agent')
         os.makedirs(agent)
+        agent = os.path.join(agent, 'profiles/primary')
+        os.makedirs(agent)
         auth = os.path.join(agent, 'auth.json')
         original = '{"deepseek":{"type":"api_key","key":"synthetic-foreign"}}'
         with open(auth, 'w') as stream: stream.write(original)
         before = _snapshot(self.home)
         result = self.lifecycle('install', '--runtime')
         self.assertNotEqual(result.returncode, 0, result.stdout+result.stderr)
-        self.assertIn('collision', result.stderr)
+        self.assertRegex(result.stderr, 'collision|foreign profile')
         self.assertEqual(_snapshot(self.home), before)
         with open(auth) as stream: self.assertEqual(stream.read(), original)
         self.assertFalse(os.path.exists(self.record), 'preflight must precede npm')
@@ -475,7 +477,7 @@ class ProviderLifecycle(InstallerWiring):
         os.symlink(shutil.which('node', path=SAFE_PATH), os.path.join(self.runtime_node, 'node'))
         self.cli_source = os.path.join(self.tmp, 'cli.js')
         with open(self.cli_source, 'w') as stream:
-            stream.write("const fs=require('fs'); fs.appendFileSync(process.env.PI_TEST_RECORD, JSON.stringify({args:process.argv.slice(2)})+'\\n'); if(process.env.PI_TEST_FAIL) process.exit(7);\n")
+            stream.write("const fs=require('fs'); fs.appendFileSync(process.env.PI_TEST_RECORD, JSON.stringify({args:process.argv.slice(2)})+'\\n'); if(process.env.PI_TEST_FAIL) process.exit(7); if(process.argv[2]==='install'||process.argv[2]==='remove'){const path=require('path'),file=path.join(process.env.PI_CODING_AGENT_DIR,'settings.json');fs.writeFileSync(file,JSON.stringify({packages:process.argv[2]==='install'?[process.argv[3]]:[]}));}\n")
         npm = os.path.join(self.runtime_node, 'npm')
         os.symlink(sys.executable, npm)
         for operation in ('ci', 'uninstall'):
@@ -550,7 +552,7 @@ else: shutil.rmtree(package)
         result = self.lifecycle('uninstall', '--runtime')
         self.assert_partial_operation(result)
         with open(self.record) as stream: records = [json.loads(line) for line in stream]
-        self.assertEqual([r.get('npm') or r['args'][0] for r in records], ['ci', 'install', 'remove'])
+        self.assertEqual([r.get('npm') or r['args'][0] for r in records], ['ci', 'install', 'install', 'remove', 'remove'])
         self.assertTrue(os.path.isfile(foreign))
         self.assertFalse(os.path.lexists(os.path.join(self.home, '.pi/agent/AGENTS.md')))
 
@@ -569,11 +571,11 @@ else: shutil.rmtree(package)
         self.assertEqual(launch().returncode, 0)
         with open(self.record) as stream: records = [json.loads(line) for line in stream]
         self.assertEqual(records[-1]['args'][:4], ['--provider', 'fixture', '--model', 'fixture-model'])
-        auth_path = os.path.join(self.home, '.pi/agent/auth.json')
+        auth_path = os.path.join(self.home, '.pi/agent/profiles/fixture-profile/auth.json')
         with open(auth_path) as stream: auth = json.load(stream)
         self.assertNotIn('deepseek', auth)
         self.assertIn('fixture.key', auth['fixture']['key'])
-        with open(os.path.join(self.home, '.pi/agent/models.json')) as stream:
+        with open(os.path.join(self.home, '.pi/agent/profiles/fixture-profile/models.json')) as stream:
             self.assertEqual(json.load(stream)['providers']['fixture']['baseUrl'], 'http://127.0.0.1:9999')
         before = _snapshot(self.home)
         with open(config_path, 'w') as stream: json.dump({'active':'missing','profiles':{'fixture-profile':{'provider':'fixture','model':'fixture-model','credential':'secrets/fixture.key'}}}, stream)
@@ -635,7 +637,7 @@ else: shutil.rmtree(package)
         with open(os.path.join(prefix, 'node_modules/@earendil-works/pi-coding-agent/package.json')) as stream:
             self.assertEqual(json.load(stream)['version'], '9.9.9', 'a bumped pin must replace the stale runtime')
         with open(self.record) as stream: records = [json.loads(line) for line in stream]
-        self.assertEqual([r.get('npm') or r['args'][0] for r in records], ['ci', 'install', 'ci', 'install'])
+        self.assertEqual([r.get('npm') or r['args'][0] for r in records], ['ci', 'install', 'install', 'ci', 'install'])
 
     def test_locked_runtime_install_uninstall_reinstall(self):
         self.prepare_runtime()
@@ -654,7 +656,7 @@ else: shutil.rmtree(package)
     def test_acquired_runtime_projects_selected_catalog_model(self):
         self.prepare_runtime()
         self.assert_partial_operation(self.lifecycle('install', '--runtime'))
-        models_file = os.path.join(self.home, '.pi/agent/models.json')
+        models_file = os.path.join(self.home, '.pi/agent/profiles/primary/models.json')
         self.assertTrue(os.path.isfile(models_file), 'runtime acquisition must project the selected pinned model')
         with open(models_file) as stream:
             models = json.load(stream)['providers']['deepseek']['models']

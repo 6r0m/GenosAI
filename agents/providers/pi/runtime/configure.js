@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {createRequire} from 'node:module';
 import {fileURLToPath, pathToFileURL} from 'node:url';
+import {spawnSync} from 'node:child_process';
 
 // Pi owns provider compatibility and thinking-level semantics. This file owns only the
 // connection-profile schema, the pinned-catalog projection and native ownership checks.
@@ -137,7 +138,58 @@ function atomic(file, data) {
   try {fs.writeFileSync(temp, JSON.stringify(data, null, 2) + '\n', {mode: 0o600, flag: 'wx'});fs.renameSync(temp, file);}
   finally {if(fs.existsSync(temp))fs.unlinkSync(temp);}
 }
-export async function configure({op, dir, root, secretRoot = path.join(root, "secrets"), profiles, profileFile, requireKey = true, cli, expected, profileId, setup = false}) {
+function stat(file) {
+  try {return fs.lstatSync(file);} catch(error) {if(error.code === 'ENOENT')return null;throw error;}
+}
+function ordinaryDirectory(file) {
+  const info=stat(file);
+  if(info && (!info.isDirectory() || info.isSymbolicLink()))throw Error('foreign or symbolic profile directory: ' + file);
+}
+const ownsPackage=(entry,dir,resources)=>typeof entry==='string' && path.resolve(dir,entry)===resources.packageRoot;
+function resourceCheck(dir, resources, state) {
+  ordinaryDirectory(resources.sessions);
+  if(!fs.statSync(resources.instructions).isFile() || !fs.statSync(path.join(resources.packageRoot,'package.json')).isFile())throw Error('canonical Pi package resources unavailable');
+  if(state.resources && !equal(state.resources,resources))throw Error('managed profile resource ownership changed');
+  if(!state.resources && stat(dir) && fs.readdirSync(dir).some(name=>name!=='.agents-sot.lock'))throw Error('foreign profile directory left alone');
+  for(const [name,target] of [['AGENTS.md',resources.instructions],['sessions',resources.sessions]]) {
+    const file=path.join(dir,name),info=stat(file);
+    if(info && (!info.isSymbolicLink() || fs.realpathSync(file)!==fs.realpathSync(target)))
+      throw Error('foreign or tampered profile link: ' + name);
+  }
+  const settings=read(path.join(dir,'settings.json'));
+  if(settings.packages!==undefined && !Array.isArray(settings.packages))throw Error('native packages must be an array');
+  if((settings.packages??[]).some(entry=>object(entry) && ownsPackage(entry.source,dir,resources)))throw Error('managed package reference changed');
+  if(!state.resources && stat(path.join(dir,'settings.json')))throw Error('foreign profile settings left alone');
+  return settings;
+}
+function nativePackage(cli, dir, resources, action) {
+  if(!cli || !fs.existsSync(cli))throw Error('native Pi required for profile package ' + action);
+  const result=spawnSync(process.execPath,[cli,action,resources.packageRoot,'--no-approve'],{
+    cwd:resources.packageRoot,env:{...process.env,PI_CODING_AGENT_DIR:dir,PI_TELEMETRY:'0',PI_OFFLINE:'1'},encoding:'utf8',timeout:30000});
+  if(result.error || result.status!==0)throw Error('native profile package '+action+' failed: '+(result.error?.message??result.stderr.trim()));
+}
+function provision(dir, resources, cli) {
+  fs.mkdirSync(resources.sessions,{recursive:true,mode:0o700});
+  for(const [name,target,type] of [['AGENTS.md',resources.instructions,'file'],['sessions',resources.sessions,process.platform==='win32'?'junction':'dir']])
+    if(!stat(path.join(dir,name)))fs.symlinkSync(target,path.join(dir,name),type);
+  const settings=read(path.join(dir,'settings.json'));
+  if(!(settings.packages??[]).some(entry=>ownsPackage(entry,dir,resources)))nativePackage(cli,dir,resources,'install');
+  if(!(read(path.join(dir,'settings.json')).packages??[]).some(entry=>ownsPackage(entry,dir,resources)))throw Error('native profile package registration missing');
+}
+function removeResources(dir, resources, cli) {
+  const settings=read(path.join(dir,'settings.json'));
+  if((settings.packages??[]).some(entry=>ownsPackage(entry,dir,resources))) {
+    if(cli && fs.existsSync(cli))nativePackage(cli,dir,resources,'remove');
+    else {settings.packages=settings.packages.filter(entry=>!ownsPackage(entry,dir,resources));atomic(path.join(dir,'settings.json'),settings);}
+  }
+  // Ownership was checked against each exact target; unlink never traverses a directory junction.
+  for(const name of ['AGENTS.md','sessions'])if(stat(path.join(dir,name)))fs.unlinkSync(path.join(dir,name));
+}
+export async function configure(options) {
+  if(options.profileScope)return configureProfile(options);
+  return project(options);
+}
+async function project({op, dir, root, secretRoot = path.join(root, "secrets"), profiles, profileFile, requireKey = true, cli, expected, profileId, setup = false, resources, dryRun=false}) {
   root = path.resolve(root);dir = path.resolve(dir);
   secretRoot=path.resolve(secretRoot);
   const credentialPath = reference => {
@@ -151,7 +203,7 @@ export async function configure({op, dir, root, secretRoot = path.join(root, "se
     return resolved;
   };
   if(!['install', 'uninstall', 'validate'].includes(op))throw Error('unsupported configuration operation');
-  const chosen = op === 'uninstall' ? null : resolveProfiles(profiles !== undefined ? profiles : readProfiles(profileFile ?? defaultProfileFile), setup);
+  const chosen = op === 'uninstall' ? null : resolveProfiles(profiles ?? readProfiles(profileFile ?? defaultProfileFile), setup);
   if(chosen && profileId !== undefined) {
     if(typeof profileId !== 'string' || !ID.test(profileId))throw Error('invalid profile selector');
     if(!Object.hasOwn(chosen.profiles,profileId))throw Error('unknown profile selector; available profiles: ' + Object.keys(chosen.profiles).join(', '));
@@ -172,8 +224,8 @@ export async function configure({op, dir, root, secretRoot = path.join(root, "se
   }
   if(cli && op !== 'uninstall')catalogModel = await verifyCatalog(chosen, cli, expected);
   const lock = path.join(dir, '.agents-sot.lock');
-  if(op !== 'validate') {
-    fs.mkdirSync(dir, {recursive: true});
+  if(op !== 'validate' && !dryRun) {
+    fs.mkdirSync(dir, {recursive: true,mode:0o700});
     const until = Date.now() + 5000;
     while(true) {
       try {fs.mkdirSync(lock);break;}
@@ -185,11 +237,14 @@ export async function configure({op, dir, root, secretRoot = path.join(root, "se
   }
   try {
     const authPath = path.join(dir, 'auth.json'), modelsPath = path.join(dir, 'models.json'), statePath = path.join(dir, 'agents-sot-state.json');
+    if(resources)for(const file of [authPath,modelsPath,statePath,path.join(dir,'settings.json')])
+      if(stat(file)?.isSymbolicLink())throw Error('symbolic native profile file refused');
     const auth = read(authPath), models = read(modelsPath), state = read(statePath);
     if(models.providers !== undefined && !object(models.providers))throw Error('native model providers must be an object');
     if(state.managed !== undefined && !object(state.managed))throw Error('managed ownership must be an object');
     for(const value of Object.values(state.managed ?? {}))if(!object(value))throw Error('managed entries must be objects');
-    if(state.root && path.resolve(state.root) !== root)throw Error('configuration belongs to another SOT');
+    if((state.root && path.resolve(state.root) !== root) || (resources && state.resources && !state.root))throw Error('configuration belongs to another SOT');
+    if(resources)resourceCheck(dir,resources,state);
     const old = state.managed ?? {};
     if(op !== 'uninstall' && !chosen) {
       if(Object.values(old).some(entries => Object.keys(entries).length))throw Error('existing managed connection requires a configured profile; refusing to clear it during setup');
@@ -225,7 +280,12 @@ export async function configure({op, dir, root, secretRoot = path.join(root, "se
         modelProviders[profile.provider] = managed.models[profile.provider];
       }
     }
-    if(op === 'validate')return {profile: chosen.active, provider: chosen.profiles[chosen.active].provider, model: chosen.profiles[chosen.active].model, thinking: chosen.profiles[chosen.active].thinking};
+    if(op === 'validate' || dryRun)return chosen ? {profile: chosen.active, provider: chosen.profiles[chosen.active].provider, model: chosen.profiles[chosen.active].model, thinking: chosen.profiles[chosen.active].thinking} : {};
+    if(resources && op!=='uninstall') {
+      // Record partial provisioning ownership so a failed local package install can be retried.
+      atomic(statePath,{root,profile:chosen.active,managed:old,resources});
+      provision(dir,resources,cli);
+    }
     // All ownership/collision checks precede the first write; each promoted file is validated JSON.
     if(!equal(auth, read(authPath)))atomic(authPath, auth);
     if(Object.keys(modelProviders).length || models.providers) {
@@ -233,12 +293,60 @@ export async function configure({op, dir, root, secretRoot = path.join(root, "se
       if(!equal(models, read(modelsPath)))atomic(modelsPath, models);
     }
     if(op === 'uninstall') {
-      if(fs.existsSync(statePath))fs.unlinkSync(statePath);
+      if(resources) {removeResources(dir,resources,cli);atomic(statePath,{root,profile:state.profile,managed:{},resources});}
+      else if(fs.existsSync(statePath))fs.unlinkSync(statePath);
       return {profile: null, provider: null, model: null, thinking: null};
     }
-    atomic(statePath, {root, profile: chosen.active, managed});
+    atomic(statePath, {root, profile: chosen.active, managed,...(resources?{resources}:{})});
     return {profile: chosen.active, provider: chosen.profiles[chosen.active].provider, model: chosen.profiles[chosen.active].model, thinking: chosen.profiles[chosen.active].thinking};
-  } finally {if(op !== 'validate')fs.rmdirSync(lock);}
+  } finally {if(op !== 'validate' && !dryRun)fs.rmdirSync(lock);}
+}
+async function configureProfile(options) {
+  const {op,profileId,setup=false}=options,base=path.resolve(options.dir),container=path.join(base,'profiles');
+  ordinaryDirectory(base);ordinaryDirectory(container);
+  const packageRoot=path.resolve(here,'../../..');
+  const resources={packageRoot,instructions:path.join(packageRoot,'AGENTS.md'),sessions:path.join(base,'sessions')};
+  const legacy={...options,profileScope:false,dir:base,op:'uninstall',resources:undefined};
+  if(op==='retire')return {...await project(legacy),agentDir:base};
+  if(op==='uninstall') {
+    if(!stat(base))return {agentDir:base};
+    const owned=[];
+    if(stat(container))for(const name of fs.readdirSync(container)) {
+      if(!ID.test(name))continue;
+      const dir=path.join(container,name);
+      if(!stat(path.join(dir,'agents-sot-state.json')))continue;
+      ordinaryDirectory(dir);
+      owned.push({...options,dir,resources,profileScope:false});
+    }
+    for(const entry of [...owned,legacy])await project({...entry,dryRun:true});
+    for(const entry of [...owned,legacy])await project(entry);
+    return {agentDir:base};
+  }
+  const chosen = op === 'uninstall' ? null : resolveProfiles(options.profiles !== undefined ? options.profiles : readProfiles(options.profileFile ?? defaultProfileFile), setup || op==='inspect');
+  if(profileId!==undefined) {
+    if(!chosen || typeof profileId!=='string' || !ID.test(profileId) || !Object.hasOwn(chosen.profiles,profileId))throw Error('invalid or unknown profile selector');
+    chosen.active=profileId;
+  }
+  if(!chosen) {
+    if(op==='inspect') {if(!stat(base))throw Error('native Pi directory not initialized');return {agentDir:base};}
+    if(stat(container) && fs.readdirSync(container).some(name=>Object.values(read(path.join(container,name,'agents-sot-state.json')).managed??{}).some(entries=>Object.keys(entries).length)))throw Error('existing managed connection requires a configured profile');
+    return {...await project({...options,profiles:{active:null,profiles:{}},profileScope:false}),agentDir:base};
+  }
+  const dir=path.join(container,chosen.active);ordinaryDirectory(dir);
+  const selected={profile:chosen.active,...chosen.profiles[chosen.active],agentDir:dir};
+  if(op==='inspect') {
+    const state=read(path.join(dir,'agents-sot-state.json'));
+    if(!stat(dir) || !state.resources || !stat(path.join(dir,'AGENTS.md')) || !stat(path.join(dir,'sessions')) || !(read(path.join(dir,'settings.json')).packages??[]).some(entry=>ownsPackage(entry,dir,resources)))throw Error('selected profile not initialized; launch it before package inspection');
+    if(path.resolve(state.root??'')!==path.resolve(options.root))throw Error('configuration belongs to another SOT');
+    resourceCheck(dir,resources,state);
+    if(options.cli)await verifyCatalog(null,options.cli,options.expected);
+    return selected;
+  }
+  if(setup)await project({...legacy,dryRun:true});
+  const projection={...options,dir,profiles:chosen,profileId:undefined,resources,profileScope:false};
+  const validated=await project({...projection,op:'validate'});
+  if(op==='validate')return {...validated,agentDir:dir};
+  return {...await project(projection),agentDir:dir};
 }
 if(process.argv[1] === new URL(import.meta.url).pathname || process.argv[1]?.replaceAll('\\', '/').endsWith('/configure.js')) {
   const args=process.argv.slice(2); const localMode=args.at(-1)==='--local'; if(localMode)args.pop();
@@ -248,10 +356,10 @@ if(process.argv[1] === new URL(import.meta.url).pathname || process.argv[1]?.rep
     const input=localMode ? JSON.parse(fs.readFileSync(0,'utf8')) : {};
     if(localMode && (typeof input.root!=='string' || typeof input.secretRoot!=='string' || typeof input.configured!=='boolean'))throw Error('local configuration reader unavailable');
     if(op==='schema') {resolveProfiles(input.profiles, setup);process.exit(0);}
-    const result = await configure({op: op === 'resolve' ? 'validate' : op, dir, root, cli, expected, profileId, setup,
+    const result = await configure({op: op === 'resolve' ? 'validate' : op, dir, root, cli, expected, profileId, setup,profileScope:true,
       ...(localMode ? {root:input.root,secretRoot:input.secretRoot,profiles:input.profiles} : {}), requireKey: op !== 'uninstall'});
     // Selection is returned from the same snapshot that was validated, and projected for install.
-    if(op === 'resolve' || op === 'install')process.stdout.write([result.profile, result.provider, result.model, result.thinking].join('\t') + '\n');
+    if(op === 'resolve' || op === 'install' || op==='inspect')process.stdout.write([result.profile??'-', result.provider??'-', result.model??'-', result.agentDir,result.thinking].join('\t') + '\n');
   }
   catch(err) {console.error('pi-config: ' + err.message);process.exitCode = 1;}
 }

@@ -84,3 +84,5 @@ no package installation; native projections retain their native format. The comm
 real connection or permissive operator preference belongs in tracked defaults. `make check` validates
 configured profile structure; selected Pi install validates configured profiles against the installed
 native catalog. Installation permits absent credentials; session startup requires a readable key.
+Native profile scope, shared conversation discovery and reapplication/removal consequences belong
+to [the Pi runtime owner](providers/pi/runtime/README.md).

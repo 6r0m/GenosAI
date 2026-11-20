@@ -15,6 +15,8 @@ instruction-derived rule families. `powershell` is disabled because these guards
 
 At session startup the adapter runs forbidden synthetic cases. `/guard-status` in an interactive Pi
 session reports loaded health, interpreter and shell. Missing/failed startup prevents gated calls.
+Credential checks cover the active native directory and sibling managed profiles, including configured
+base locations and native/WSL path spellings; the startup probe includes profile auth paths.
 Each call requires a positive marker; denies, missing markers, malformed output, spawn/handler errors
 and timeouts block with a reason. A timeout terminates the spawned shell/interpreter tree and reports
 whether exit was observed. [Adapter tests](../../../tests/providers/pi/adapter.test.js) exercise a real sleeping

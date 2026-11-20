@@ -158,6 +158,7 @@ pi() {
     if [[ "$available" == 1 ]]; then
       pi_native_package "$platform" "$task_node" "$native_cli" "$task_agent" install "$agent_root"
       "$task_node" "$config_script" install "${config_args[@]}" "${runtime_args[@]}" --setup --local <<<"$local_json" >/dev/null
+      "$task_node" "$config_script" retire "${config_args[@]}" --local <<<"$local_json"
       mkdir -p "$(dirname "$task_launcher")"
       if [[ -e "$task_launcher" ]] && ! grep -qF 'agents SOT launcher' "$task_launcher"; then echo 'error: foreign Pi launcher left alone' >&2; return 1; fi
       if [[ "$platform" == wsl ]]; then
@@ -175,9 +176,9 @@ pi() {
     else echo "skipped Pi registration on $platform: runtime absent; run install.sh --provider $id --runtime"; fi
   else
     if [[ "$available" == 1 ]]; then
-      pi_native_package "$platform" "$task_node" "$native_cli" "$task_agent" remove "$agent_root"
       local config_script="$AI_ROOT/providers/pi/runtime/configure.js"; [[ "$platform" != windows ]] || config_script="$(wslpath -w "$config_script")"
-      "$task_node" "$config_script" uninstall "$task_agent" "$task_repo" --local <<<"$local_json"
+      "$task_node" "$config_script" uninstall "$task_agent" "$task_repo" "$native_cli" --local <<<"$local_json"
+      pi_native_package "$platform" "$task_node" "$native_cli" "$task_agent" remove "$agent_root"
     else
       echo "skipped Pi package removal on $platform: runtime absent; cleaning owned links"
       if [[ -d "$home/${PROVIDER_DIR[$id]}" ]]; then
