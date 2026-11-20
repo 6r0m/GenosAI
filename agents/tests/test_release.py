@@ -108,6 +108,74 @@ class Distribution(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):release.export(source,self.base/'export')
         self.assertFalse((self.base/'export').exists())
 
+    def test_declared_directory_scope_admits_descendants_without_per_file_entries(self):
+        source=self.base/'source';source.mkdir()
+        (source/'README.md').write_text('public')
+        self.admit(source,'README.md','todo/')
+        for name in ('todo/README.md','todo/2026-01-01_0000-plan.md','todo/done/2026-01-02_0000-closed.md'):
+            file=source/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('plan')
+        result=release.export(source,self.base/'export')
+        self.assertIn('todo/done/2026-01-02_0000-closed.md',result)
+        self.assertEqual(release.personal_candidates(source,list(release.source_files(source))),[])
+        release.check(source,True)
+
+    def test_directory_scope_refuses_a_sibling_prefix(self):
+        source=self.base/'source';source.mkdir()
+        (source/'README.md').write_text('public');self.admit(source,'README.md','todo/')
+        (source/'todo').mkdir();(source/'todo/plan.md').write_text('plan')
+        (source/'todo2').mkdir();(source/'todo2/notes.md').write_text('outside the declared scope')
+        with self.assertRaisesRegex(ValueError,'unclassified source file: todo2/notes.md'):
+            list(release.source_files(source))
+
+    def test_directory_scope_still_refuses_private_names_inside_it(self):
+        source=self.base/'source';source.mkdir()
+        (source/'README.md').write_text('public');self.admit(source,'README.md','todo/')
+        (source/'todo/done').mkdir(parents=True)
+        (source/'todo/done/plan.md').write_text('plan')
+        (source/'todo/config.local.json').write_text('{}')
+        (source/'todo/done/notes.log').write_text('synthetic private marker')
+        self.assertEqual(set(release.export(source,self.base/'export')),{'README.md','todo/done/plan.md','tools/source-manifest.json'})
+        with self.assertRaisesRegex(ValueError,r'forbidden distribution artifact: todo[\\/]config\.local\.json'):
+            release.check(source,True)
+
+    def test_missing_declared_scope_refuses_instead_of_admitting_nothing(self):
+        source=self.base/'source';source.mkdir()
+        (source/'README.md').write_text('public');self.admit(source,'README.md','plans/')
+        with self.assertRaisesRegex(ValueError,'missing admitted source scope: plans'):
+            list(release.source_files(source))
+        self.assertFalse((self.base/'export').exists())
+        with self.assertRaises(ValueError):release.export(source,self.base/'export')
+        self.assertFalse((self.base/'export').exists())
+
+    def test_scope_entries_refuse_traversal_absolute_private_and_collisions(self):
+        source=self.base/'source';source.mkdir()
+        (source/'README.md').write_text('public')
+        for extra in ('../outside/','agents/../outside/','/absolute/','tmp/','todo','todo/'):
+            with self.subTest(extra=extra):
+                entries=['README.md',extra]
+                if extra=='todo/': entries.append('todo')
+                self.admit(source,*entries)
+                with self.assertRaises(ValueError):release.export(source,self.base/('export-'+str(abs(hash(extra)))))
+
+    @unittest.skipUnless(shutil.which('git') and shutil.which('gitleaks'),'requires Git and pinned scanner')
+    def test_independent_index_accepts_scope_descendant(self):
+        source=self.base/'git-source';source.mkdir();(source/'README.md').write_text('public')
+        self.admit(source,'README.md','todo/')
+        subprocess.run(['git','init','-q',str(source)],check=True,capture_output=True)
+        (source/'todo/done').mkdir(parents=True);(source/'todo/done/plan.md').write_text('plan')
+        subprocess.run(['git','-C',str(source),'add','README.md','tools/source-manifest.json','todo/done/plan.md'],check=True)
+        (self.base/'index-ok').mkdir();release.check_index(source,self.base/'index-ok')
+
+    @unittest.skipUnless(shutil.which('git') and shutil.which('gitleaks'),'requires Git and pinned scanner')
+    def test_independent_index_refuses_scope_that_does_not_exist(self):
+        source=self.base/'git-source';source.mkdir();(source/'README.md').write_text('public')
+        self.admit(source,'README.md','plans/')
+        subprocess.run(['git','init','-q',str(source)],check=True,capture_output=True)
+        subprocess.run(['git','-C',str(source),'add','README.md','tools/source-manifest.json'],check=True)
+        (self.base/'index-typo').mkdir()
+        with self.assertRaisesRegex(ValueError,'missing admitted source scope: plans'):
+            release.check_index(source,self.base/'index-typo')
+
     def test_personal_path_controls_and_neutral_examples(self):
         source=self.base/'paths.md'
         source.write_text('/'+'home/'+ 'private-person/project\n'+ 'C:'+r'\Users\private-person\project'+'\n')

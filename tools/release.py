@@ -32,19 +32,29 @@ def admitted_files(root):
     data=json.loads((root/SOURCE_MANIFEST).read_text(encoding='utf-8'))
     if not isinstance(data,dict) or set(data)!={'version','files'} or type(data['version']) is not int or data['version']!=1 or not isinstance(data['files'],list):
         raise ValueError('invalid source disposition manifest schema')
-    admitted=set();portable=set()
+    admitted=set();scopes=set();portable=set()
     for name in data['files']:
-        if not isinstance(name,str) or not name or any(c in name for c in ('\\',':','\0')) or any(p in ('','.','..') for p in name.split('/')):
+        if not isinstance(name,str) or not name: raise ValueError('invalid source disposition path')
+        scope=name.endswith('/')
+        path=name[:-1] if scope else name
+        if not path or any(c in path for c in ('\\',':','\0')) or any(p in ('','.','..') for p in path.split('/')):
             raise ValueError('invalid source disposition path')
-        relative=Path(name)
+        relative=Path(path)
         if relative.is_absolute() or private(relative): raise ValueError('private or absolute source disposition path')
         if name.casefold() in portable: raise ValueError('duplicate source disposition path')
-        portable.add(name.casefold());admitted.add(name)
+        portable.add(name.casefold());(scopes if scope else admitted).add(path)
     if SOURCE_MANIFEST.as_posix() not in admitted: raise ValueError('source disposition manifest must admit itself')
-    return admitted
+    if admitted & scopes: raise ValueError('source disposition file/directory collision')
+    return admitted,scopes
+
+def covered(name,admitted,scopes):
+    return name in admitted or any(name.startswith(scope+'/') for scope in scopes)
+
+def scope_path(name,scopes):
+    return any(name==scope or name.startswith(scope+'/') or scope.startswith(name+'/') for scope in scopes)
 
 def source_files(root,artifact=False):
-    admitted=admitted_files(root)
+    admitted,scopes=admitted_files(root)
     directories={parent.as_posix() for name in admitted for parent in Path(name).parents if parent!=Path('.')}
     if admitted & directories: raise ValueError('source disposition file/directory collision')
     found={}
@@ -57,15 +67,17 @@ def source_files(root,artifact=False):
             if item.is_symlink(): raise ValueError('source link requires explicit disposition: '+str(relative))
             name=relative.as_posix()
             if item.is_dir():
-                if artifact and name not in directories: raise ValueError('unclassified source directory: '+name)
+                if artifact and name not in directories and not scope_path(name,scopes): raise ValueError('unclassified source directory: '+name)
                 walk(item)
             elif item.is_file():
-                if name not in admitted: raise ValueError('unclassified source file: '+name)
+                if not covered(name,admitted,scopes): raise ValueError('unclassified source file: '+name)
                 found[name]=item
             else: raise ValueError('unreadable source entry: '+str(relative))
     walk(root)
     missing=admitted-found.keys()
     if missing: raise ValueError('missing admitted source file: '+', '.join(sorted(missing)))
+    absent=[scope for scope in sorted(scopes) if not (root/scope).is_dir()]
+    if absent: raise ValueError('missing admitted source scope: '+', '.join(absent))
     yield from (found[name] for name in sorted(found))
 
 def personal_candidates(root,files):
@@ -138,9 +150,9 @@ def check_index(root,scratch,required=False):
         if SOURCE_MANIFEST.as_posix() not in indexed: raise ValueError('unclassified indexed source file: missing staged manifest')
         manifest=staged/SOURCE_MANIFEST;manifest.parent.mkdir(parents=True)
         manifest.write_bytes(subprocess.check_output(['git','-C',str(root),'show',':'+SOURCE_MANIFEST.as_posix()]))
-        admitted=admitted_files(staged)
+        admitted,scopes=admitted_files(staged)
         for name in indexed:
-            if name not in admitted: raise ValueError('unclassified indexed source file: '+name)
+            if not covered(name,admitted,scopes): raise ValueError('unclassified indexed source file: '+name)
         for name in indexed:
             target=staged/name;target.parent.mkdir(parents=True,exist_ok=True)
             target.write_bytes(subprocess.check_output(['git','-C',str(root),'show',':'+name]))
