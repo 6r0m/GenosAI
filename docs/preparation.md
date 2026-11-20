@@ -21,8 +21,9 @@ reviewed declaration, not a walk.
 
 Private disposition remains exclusion: local settings, credentials, caches, logs, backups, native stores
 and Git metadata stay with their private owners and are skipped before opening them. Those name, suffix
-and directory matches are case-insensitive, so a scope cannot admit `provider.KEY` or `TMP/` by case alone.
-No enclosing Git history or historical execution receipt is distributed. Pattern scans cannot certify arbitrary
+and directory matches are case-insensitive, and a `secrets` directory is private at any depth, so a scope
+cannot admit `provider.KEY`, `TMP/` or `todo/secrets/` by case or position alone; only the admitted root
+`secrets/README.md` remains public. No enclosing Git history or historical execution receipt is distributed. Pattern scans cannot certify arbitrary
 personal data in an admitted file; review changes to admitted content as well as the admission list.
 
 `make export DEST=<outside-source-path> MANIFEST=<receipt.json>` produces a source-only directory and

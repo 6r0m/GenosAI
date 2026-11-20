@@ -181,8 +181,25 @@ class Distribution(unittest.TestCase):
             self.assertTrue(release.portable(name),name)
         for name in ('','todo/a:b.md','todo/a'+chr(92)+'b.md','todo/nul'+chr(0)+'x.md','../x','todo/./x','/abs/x','a//b',
                      'todo/CON.md','todo/nul','todo/com1.txt','todo/LPT9','todo/a?.md','todo/a<1>.md','todo/a|b.md',
-                     'todo/a*b.md','todo/a"b.md','todo/plan.','todo/trail ','todo/dir./x.md','todo/'+chr(7)+'bell.md'):
+                     'todo/a*b.md','todo/a"b.md','todo/plan.','todo/trail ','todo/dir./x.md','todo/'+chr(7)+'bell.md',
+                     'todo/COM'+chr(185)+'.md','todo/com'+chr(178)+'.txt','todo/LPT'+chr(179)):
             self.assertFalse(release.portable(name),repr(name))
+
+    def test_nested_secrets_directories_stay_excluded_inside_a_scope(self):
+        source=self.base/'source';source.mkdir()
+        (source/'README.md').write_text('public');self.admit(source,'README.md','todo/','secrets/README.md')
+        (source/'todo/done').mkdir(parents=True);(source/'todo/done/plan.md').write_text('plan')
+        (source/'secrets').mkdir();(source/'secrets/README.md').write_text('storage notice')
+        for name in ('todo/secrets/credentials.json','todo/Secrets/creds.json','todo/secrets/README.md'):
+            file=source/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('synthetic private marker')
+        self.assertEqual(set(release.export(source,self.base/'export')),
+            {'README.md','todo/done/plan.md','secrets/README.md','tools/source-manifest.json'})
+        artifact=self.base/'artifact';artifact.mkdir()
+        (artifact/'tools').mkdir()
+        (artifact/'tools/source-manifest.json').write_text((source/'tools/source-manifest.json').read_text())
+        (artifact/'secrets').mkdir();(artifact/'secrets/README.md').write_text('storage notice')
+        nested=artifact/'todo/secrets/x.json';nested.parent.mkdir(parents=True);nested.write_text('marker')
+        with self.assertRaisesRegex(ValueError,'forbidden distribution artifact'):release.check(artifact,True)
 
     def test_uppercase_private_names_stay_excluded_inside_a_scope(self):
         source=self.base/'source';source.mkdir()
