@@ -9,11 +9,12 @@ are excluded. It never prints matched secret values.
 The reviewed [source disposition manifest](../tools/source-manifest.json) is the public-file allowlist,
 including itself, reusable defaults, synthetic fixtures and required upstream notices. A path admits
 exactly that file; a path with a trailing separator (`todo/`) declares a reviewed directory scope that
-admits every nonprivate descendant and nothing beside it, including `todo/done/`. Everywhere else a new
+admits every portable, nonprivate descendant and nothing beside it, including `todo/done/`. Everywhere else a new
 file requires explicit review and admission, even inside an existing component. Scope admission never
-overrides private disposition, and a declared scope absent from the checked tree fails closed rather than
-protecting nothing. Missing admitted files, unknown nonprivate files, private entries in the manifest and
-source links fail closed before export creates a destination.
+overrides private disposition, a name a target platform cannot represent refuses the check, and two paths
+differing only by case refuse rather than overwriting each other; a declared scope absent from the checked
+tree fails closed rather than protecting nothing. Missing admitted files, unknown nonprivate files, private
+entries in the manifest and source links fail closed before export creates a destination.
 Artifact checking also refuses empty directories outside the admitted tree.
 Do not regenerate admission from a directory walk or the Git index as part of export/check: a scope is a
 reviewed declaration, not a walk.

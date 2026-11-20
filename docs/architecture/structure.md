@@ -43,5 +43,6 @@ Default installation selects the shared environment on the host. Provider and Wi
 require explicit selection. Initialization preserves existing local input; checks make no provider
 request or native settings change. Component owners retain their validation and mutation contracts.
 
-Distribution requires reviewed file admission. Secret-pattern checks cannot certify absence of arbitrary
-personal prose or topology; manual content and metadata review remains necessary.
+Distribution requires reviewed admission of files and declared directory scopes. Secret-pattern checks
+cannot certify absence of arbitrary personal prose or topology; manual content and metadata review
+remains necessary.

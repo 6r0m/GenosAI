@@ -25,6 +25,20 @@ def private(relative):
             (relative.name.startswith('.env.') and relative.name!='.env.example') or
             relative.suffix in PRIVATE_SUFFIXES)
 
+def portable(name):
+    return bool(name) and not any(c in name for c in ('\\',':','\0')) and not any(p in ('','.','..') for p in name.split('/'))
+
+def case_collisions(names):
+    grouped={}
+    for name in names: grouped.setdefault(name.casefold(),set()).add(name)
+    return sorted((key,sorted(paths)) for key,paths in grouped.items() if len(paths)>1)
+
+def with_parents(names):
+    expanded=set(names)
+    for name in names:
+        expanded.update(parent.as_posix() for parent in Path(name).parents if parent!=Path('.'))
+    return expanded
+
 def admitted_files(root):
     for relative in (SOURCE_MANIFEST.parent,SOURCE_MANIFEST):
         if (root/relative).is_symlink():
@@ -32,17 +46,16 @@ def admitted_files(root):
     data=json.loads((root/SOURCE_MANIFEST).read_text(encoding='utf-8'))
     if not isinstance(data,dict) or set(data)!={'version','files'} or type(data['version']) is not int or data['version']!=1 or not isinstance(data['files'],list):
         raise ValueError('invalid source disposition manifest schema')
-    admitted=set();scopes=set();portable=set()
+    admitted=set();scopes=set();declared=set()
     for name in data['files']:
         if not isinstance(name,str) or not name: raise ValueError('invalid source disposition path')
         scope=name.endswith('/')
         path=name[:-1] if scope else name
-        if not path or any(c in path for c in ('\\',':','\0')) or any(p in ('','.','..') for p in path.split('/')):
-            raise ValueError('invalid source disposition path')
+        if not portable(path): raise ValueError('invalid source disposition path')
         relative=Path(path)
         if relative.is_absolute() or private(relative): raise ValueError('private or absolute source disposition path')
-        if name.casefold() in portable: raise ValueError('duplicate source disposition path')
-        portable.add(name.casefold());(scopes if scope else admitted).add(path)
+        if name.casefold() in declared: raise ValueError('duplicate source disposition path')
+        declared.add(name.casefold());(scopes if scope else admitted).add(path)
     if SOURCE_MANIFEST.as_posix() not in admitted: raise ValueError('source disposition manifest must admit itself')
     if admitted & scopes: raise ValueError('source disposition file/directory collision')
     return admitted,scopes
@@ -66,6 +79,7 @@ def source_files(root,artifact=False):
                 continue
             if item.is_symlink(): raise ValueError('source link requires explicit disposition: '+str(relative))
             name=relative.as_posix()
+            if not portable(name): raise ValueError('nonportable source path: '+name)
             if item.is_dir():
                 if artifact and name not in directories and not scope_path(name,scopes): raise ValueError('unclassified source directory: '+name)
                 walk(item)
@@ -74,6 +88,8 @@ def source_files(root,artifact=False):
                 found[name]=item
             else: raise ValueError('unreadable source entry: '+str(relative))
     walk(root)
+    collisions=case_collisions(with_parents(found))
+    if collisions: raise ValueError('case-insensitive path collision: '+' vs '.join(collisions[0][1]))
     missing=admitted-found.keys()
     if missing: raise ValueError('missing admitted source file: '+', '.join(sorted(missing)))
     absent=[scope for scope in sorted(scopes) if not (root/scope).is_dir()]
@@ -145,6 +161,10 @@ def check_index(root,scratch,required=False):
         if mode not in ('100644','100755') or stage!='0': raise ValueError('unsupported indexed source entry: '+name)
         if private(Path(name)): raise ValueError('private file tracked: '+name)
         indexed.append(name)
+    for name in indexed:
+        if not portable(name): raise ValueError('nonportable indexed source path: '+name)
+    collisions=case_collisions(with_parents(indexed))
+    if collisions: raise ValueError('case-insensitive path collision: '+' vs '.join(collisions[0][1]))
     staged=scratch/'index';staged.mkdir()
     if indexed:
         if SOURCE_MANIFEST.as_posix() not in indexed: raise ValueError('unclassified indexed source file: missing staged manifest')

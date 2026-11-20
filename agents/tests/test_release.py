@@ -116,8 +116,8 @@ class Distribution(unittest.TestCase):
             file=source/name;file.parent.mkdir(parents=True,exist_ok=True);file.write_text('plan')
         result=release.export(source,self.base/'export')
         self.assertIn('todo/done/2026-01-02_0000-closed.md',result)
+        self.assertIn('todo/done/2026-01-02_0000-closed.md',[f.relative_to(source).as_posix() for f in release.source_files(source,artifact=True)])
         self.assertEqual(release.personal_candidates(source,list(release.source_files(source))),[])
-        release.check(source,True)
 
     def test_directory_scope_refuses_a_sibling_prefix(self):
         source=self.base/'source';source.mkdir()
@@ -175,6 +175,81 @@ class Distribution(unittest.TestCase):
         (self.base/'index-typo').mkdir()
         with self.assertRaisesRegex(ValueError,'missing admitted source scope: plans'):
             release.check_index(source,self.base/'index-typo')
+
+    def test_portable_paths_refuse_separators_drive_volume_and_dot_segments(self):
+        for name in ('todo/a.md','agents/x/y.md'):
+            self.assertTrue(release.portable(name),name)
+        for name in ('','todo/a:b.md','todo/a'+chr(92)+'b.md','todo/nul'+chr(0)+'x.md','../x','todo/./x','/abs/x','a//b'):
+            self.assertFalse(release.portable(name),repr(name))
+
+    @unittest.skipUnless(os.name=='posix','requires POSIX filename semantics')
+    def test_unportable_descendants_refuse_on_a_posix_host(self):
+        source=self.base/'source';source.mkdir()
+        (source/'README.md').write_text('public');self.admit(source,'README.md','todo/')
+        (source/'todo').mkdir()
+        for name in ('dupe:a.md','nested'+chr(92)+'x.md','nul'+chr(0)+'x.md'):
+            with self.subTest(name=repr(name)):
+                (source/'todo'/name).write_text('plan')
+                with self.assertRaisesRegex(ValueError,'nonportable source path'):list(release.source_files(source))
+                with self.assertRaises(ValueError):release.export(source,self.base/'export')
+                self.assertFalse((self.base/'export').exists())
+                (source/'todo'/name).unlink()
+
+    @unittest.skipUnless(os.name=='posix','requires case-sensitive filenames')
+    def test_case_colliding_descendants_refuse_on_a_posix_host(self):
+        source=self.base/'source';source.mkdir()
+        (source/'README.md').write_text('public');self.admit(source,'README.md','todo/')
+        (source/'todo/done').mkdir(parents=True)
+        (source/'todo/Plan.md').write_text('one');(source/'todo/plan.md').write_text('two')
+        (source/'todo/done').mkdir(exist_ok=True)
+        with self.assertRaisesRegex(ValueError,'case-insensitive path collision: todo/Plan.md vs todo/plan.md'):
+            list(release.source_files(source))
+        with self.assertRaises(ValueError):release.export(source,self.base/'export')
+        self.assertFalse((self.base/'export').exists())
+
+    def test_index_case_collision_refuses_before_writing_staged_snapshot(self):
+        source=self.base/'source';source.mkdir()
+        (source/'tools').mkdir();(source/'tools/source-manifest.json').write_text(json.dumps({'version':1,'files':['tools/source-manifest.json','todo/']}))
+        (source/'todo/done').mkdir(parents=True)
+        for name in ('todo/Plan.md','todo/plan.md'):
+            (source/name).write_text('plan')
+        entries=[('tools/source-manifest.json',(source/'tools/source-manifest.json').read_bytes()),('todo/Plan.md',b'plan'),('todo/plan.md',b'plan')]
+        def fake(cmd,*args,**kwargs):
+            if cmd[3]=='ls-files':
+                return b''.join(b'100644 '+b'0'*40+b' 0\t'+name.encode()+b'\0' for name,_ in entries)
+            if cmd[3]=='show':
+                return dict(entries)[cmd[4][1:]]
+            raise AssertionError(cmd)
+        scratch=self.base/'scratch'
+        with mock.patch.object(release.subprocess,'check_output',side_effect=fake):
+            with self.assertRaisesRegex(ValueError,'case-insensitive path collision: todo/Plan.md vs todo/plan.md'):
+                release.check_index(source,scratch)
+        self.assertFalse(scratch.exists(),'staged snapshot must not be written before portability refusal')
+
+    def test_index_refuses_unportable_descendant_under_a_scope(self):
+        source=self.base/'source';source.mkdir()
+        (source/'tools').mkdir();(source/'tools/source-manifest.json').write_text(json.dumps({'version':1,'files':['tools/source-manifest.json','todo/']}))
+        entries=[('tools/source-manifest.json',(source/'tools/source-manifest.json').read_bytes()),('todo/a:b.md',b'plan')]
+        def fake(cmd,*args,**kwargs):
+            if cmd[3]=='ls-files':
+                return b''.join(b'100644 '+b'0'*40+b' 0\t'+name.encode()+b'\0' for name,_ in entries)
+            if cmd[3]=='show':
+                return dict(entries)[cmd[4][1:]]
+            raise AssertionError(cmd)
+        with mock.patch.object(release.subprocess,'check_output',side_effect=fake):
+            with self.assertRaisesRegex(ValueError,'nonportable indexed source path: todo/a:b.md'):
+                release.check_index(source,self.base/'scratch')
+        self.assertFalse((self.base/'scratch').exists())
+
+    def test_scope_plus_explicit_router_file_refuses_its_deletion(self):
+        source=self.base/'source';source.mkdir()
+        (source/'README.md').write_text('public');self.admit(source,'README.md','todo/','todo/README.md')
+        (source/'todo/done').mkdir(parents=True)
+        (source/'todo/README.md').write_text('router');(source/'todo/done/plan.md').write_text('plan')
+        self.assertIn('todo/done/plan.md',release.export(source,self.base/'export'))
+        (source/'todo/README.md').unlink()
+        with self.assertRaisesRegex(ValueError,'missing admitted source file: todo/README.md'):
+            list(release.source_files(source))
 
     def test_personal_path_controls_and_neutral_examples(self):
         source=self.base/'paths.md'

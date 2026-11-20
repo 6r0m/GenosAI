@@ -164,6 +164,7 @@
     "integrations/comfyui/model-downloads/download_wan22_i2v.sh",
     "secrets/README.md",
     "todo/",
+    "todo/README.md",
     "tools/README.md",
     "tools/release.py",
     "tools/setup.py",
