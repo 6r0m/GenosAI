@@ -8,6 +8,7 @@ Portable coding-agent configuration and optional AI product utilities.
 | [integrations/](integrations/README.md) | Product-specific utilities |
 | [tools/](tools/README.md) | Setup, checks and source export |
 | [docs/](docs/README.md) | Structure, diagrams and source verification |
+| [todo/](todo/README.md) | Open change plans awaiting decision |
 | [secrets/](secrets/README.md) | Private AI credential storage |
 
 From Linux or WSL, with Make, Python 3.10+, Bash and Git installed:

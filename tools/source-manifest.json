@@ -163,6 +163,8 @@
     "integrations/comfyui/model-downloads/download_models.sh",
     "integrations/comfyui/model-downloads/download_wan22_i2v.sh",
     "secrets/README.md",
+    "todo/2026-11-20_1728-pi-profile-plugins-image-budget.md",
+    "todo/README.md",
     "tools/README.md",
     "tools/release.py",
     "tools/setup.py",
