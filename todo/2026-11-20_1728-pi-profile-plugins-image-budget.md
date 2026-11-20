@@ -84,10 +84,10 @@ driven by configuration rather than edits scattered across the integration.
   necessary for the requested global/profile selection contract.
 - **A2 [ACTIVE]:** Enablement is fixed for a launched process. Configuration changes take
   effect on its next launch; changing the selected model does not silently enable other plugins.
-- **A3 [REJECTED by evidence]:** Reuse upstream image-budget algorithms selectively under their license;
+- **A3 [SUPERSEDED by A4]:** Reuse upstream image-budget algorithms selectively under their license;
   adoption of the entire upstream extension is conditional on compatibility and ownership proof.
-  The intact extension loaded and reduced requests on pinned Pi, so stripping it down before
-  testing would discard working behavior without evidence that the integration requires it. See A4.
+  The intact package is now the starting point for compatibility testing. Selective reuse remains
+  technically feasible if the whole-package integration proves unsuitable.
 - **A4 [ACTIVE]:** Start from the pinned `pi-image-budget` implementation and retain its tested
   algorithms. Prefer a small upstream integration seam and fix if the acceptance cases support it.
 
@@ -189,6 +189,18 @@ ledger without demonstrated need, or promise to police arbitrary third-party pay
   failed attempt from projected messages before `agent_before_settle`. Upstream searches those
   projected messages for the failed attempt before it offers recovery. This makes native overflow
   coordination a compatibility requirement. [Pi session loop](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/src/core/agent-session.ts).
+- Pi can append the failed-attempt omission before preparing automatic compaction. The
+  `session_before_compact` hook runs only after a valid cut point has been found. It receives
+  the compaction reason and raw branch entries. Returning `{cancel: true}` at that point
+  prevents the summary request and new compaction entry. An earlier omission can still be
+  present, including in short branches where Pi could not prepare compaction at all.
+  [Overflow classifier](https://github.com/earendil-works/pi/blob/v1.5.2/packages/ai/src/utils/overflow.ts)
+  and [compaction preparation](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/src/core/compaction/compaction.ts).
+- A WSL diagnostic retained the pinned candidate and set the fixture's recent-token budget to
+  256 so Pi could find a valid cut point. After turn 8's 8.1 MiB HTTP 413, the endpoint recorded
+  two summary requests and one native continuation with zero images. Pi emitted `session_compact`
+  for `overflow`, and the CLI exited zero. The upstream exit status alone therefore cannot
+  distinguish native text compaction from the desired image-only recovery.
 - The earlier local CLI cancellation probe against Pi 1.5.2 observed zero loopback HTTP
   requests for each of the byte, count, individual-image and measurement-failure abort cases.
   The throw-only control reached the endpoint and a transient-error control retried. A later
@@ -319,11 +331,35 @@ resolved options, exact-route activation, protected-image and final enforcement 
 the observed CLI and lifecycle contracts. Keep resulting changes reviewable against the source
 pin. Prefer an upstream option and compatibility fix. If that is unavailable, keep a small
 licensed patch at the dependency boundary with its provenance and tests. Avoid a clean-room engine.
-Exercise recovery with native auto-compaction enabled, and coordinate confirmed image-limit
-overflow without disturbing native compaction for unrelated errors or user requests. The
-compaction-disabled fixture is diagnostic evidence, not the proposed production setting.
 If the necessary changes exceed that boundary, bring the measured gap back for review before
 starting another implementation. Do not activate upstream recovery simply because its unit tests pass.
+
+### Native overflow coordination
+
+Keep native auto-compaction enabled during acceptance. The compatibility layer owns a
+single pending attempt in process, using the existing upstream recovery state where practical.
+Coordinate the following Pi lifecycle hooks for the same branch, input and effective route.
+
+1. At `message_end`, bind the confirmed rejection to the failed assistant and to the measured
+   request that elicited it. Record the image count or bytes and which reduction is possible.
+   A generic HTTP 413 identifies a body-size problem. Treat it as recoverable by this plugin
+   only when the measured attempt contained eligible images and the same history admits a
+   demonstrably smaller candidate within the route limits. Keep explicit token overflows,
+   text-only failures and ambiguous errors out of the plugin recovery path.
+2. At `session_before_compact`, cancel only `reason: "overflow"` with `willRetry: true` when
+   the raw branch identifies that same current failed attempt and its smaller candidate is
+   ready within the remaining recovery allowance. If attribution or reduction is uncertain,
+   leave Pi's decision in force. Manual and threshold compaction keep their normal behavior.
+3. At `agent_before_settle`, match the pending failure to the raw attempt and current projection.
+   Recover even if Pi already hid the failed assistant. Reuse its existing omission and add a
+   context edit only when the identified failed assistant still contributes to the projection.
+   Check `canContinue` against the context after any necessary omission. Consume the allowance
+   before requesting continuation and recheck the exact reduced body at the request boundary.
+   The same continuation path must work on short branches where the compaction hook never ran.
+
+Invalidate stale recovery state on success, abort, settlement, input or route/branch change.
+Preserve session originals, relevant tool pairs and ordinary Pi compaction. Keep the
+compaction-disabled run as a diagnostic control. It does not satisfy the production gate.
 
 Scope every request transformation and learned limit to the resolved provider, model, API and
 normalized endpoint. An in-session model/route switch must not inherit another route's budget;
@@ -438,6 +474,7 @@ marketplace acquisition and hot-changing the plugin set inside an active process
 - [ ] Add the smallest Pi-owned optional entrypoint/ID resolver needed for the selected contract. Keep optional modules out of unconditional manifest discovery; retain the existing mandatory package.
 - [ ] Establish D4's thin adapter contract and validate byte/count/policy options at the existing input boundary. Demonstrate two configurations and a synthetic replacement implementation without changing lifecycle/launcher code or reading an independent plugin config file.
 - [ ] Turn the reproduced same-turn 413 gap into a managed regression. Keep the immutable upstream revision, audit dependencies/license, and integrate the upstream implementation with the smallest changes needed for the actual acceptance cases. Record provenance/notices and exact source admission for incorporated files.
+- [ ] Implement the three-hook overflow coordination at the upstream integration boundary. Prove that short histories recover after native omission and that a long, eligible history avoids the summary request only for the matched, recoverable image-limit failure.
 - [ ] Implement independent scoped byte/count budgets, boundary-derived protected-image policy, confirmed bounded recovery and observable refusal; verify supported OpenAI-compatible payload handling and explicit coverage/no-op behavior for unsupported routes.
 - [ ] Validate applicable per-image byte/dimension restrictions on final outbound candidates, reusing native processing. Cover originals retained after processor failure and the count-dependent dimension boundary; refuse protected images that cannot fit without altering persisted originals.
 - [ ] Exercise existing install/uninstall, source-move ownership, credential-free setup and second-apply checks. Change lifecycle code only where an acceptance case demonstrates a missing responsibility.
@@ -465,11 +502,18 @@ Use generated public images, synthetic keys and local recording endpoints only.
 | Ordering/coverage — permanent guard + native acceptance | Show a later foreign hook can invalidate an earlier check; prove managed growth precedes the guard and do not claim the foreign case is protected. Inspect/test normal turns versus compaction/branch/nested paths to delimit hook coverage. |
 | Protected images/history — permanent guard | Define current/unprocessed and successful-answer history, then demonstrate missing outbound reduction; assert original records/text/images remain intact after reduction, retry and resume. |
 | Route switching — permanent guard | Cover matched opt-in, non-opt-in, differing endpoint/API/model, native model switch and two process-local selections without shared plugin-setting mutation. |
-| Recovery — permanent guard + native acceptance | Run with native auto-compaction enabled. A local 413 then success must show smaller bytes and at most one plugin recovery in the same turn, without a compaction request; explicit count rejection must reduce count. Preserve unrelated native compaction. Repeated rejection, text-only overflow, ambiguous 503, reset/401/429, abort and native retry interaction must not produce an uncontrolled continuation. |
+| Short-history recovery — permanent guard + native acceptance | Under native auto-compaction, reproduce a 413 where Pi omits the failed attempt but cannot prepare a summary. It must settle after exactly one smaller retry in the same turn. Assert one omission or reuse of the existing omission, with original records and tool pairs intact. |
+| Long-history image 413 — permanent guard + native acceptance | Seed enough real session entries for Pi to prepare overflow compaction. The known-bad control must receive a summary request and append a native compaction entry. With the fix, observe the matching `session_before_compact` decision, zero summary requests, zero new compaction entries and one smaller successful retry in the same turn. Require actual recorded wire bytes and no duplicate omission. |
+| Genuine token overflow — permanent guard + native acceptance | On the same route and long fixture, return a recognized token-context overflow with images still present. Observe the native summary request, new compaction entry and native continuation. Also preserve manual and threshold compaction in targeted reason cases. |
+| Recovery bounds and attribution — permanent guard | Explicit image-count rejection must reduce count. Repeated rejection after recovery, text-only 413, a protected image that cannot fit, stale route/attempt evidence, ambiguous 503, reset/401/429 and abort must not schedule plugin recovery or suppress unrelated compaction. Check interaction with native retries through settlement. |
 | Platform/reapply/removal — acceptance | Real Windows and WSL native launchers must load the selected local entrypoints with Unicode/spaced paths; second install and owned removal preserve sentinels. |
 | KISS/source/privacy — reviewer judgment | Check sole ownership, dependency/provenance scope, no extra operator config, and no private operational material. Do not replace this judgment with text-presence tests. |
 
 Instrument the provider's received UTF-8 body and dispatch count, not only the plugin's estimate.
+For the compaction fixture, distinguish summary and normal requests at the recording endpoint and
+check raw session entries as well as hook events. An `overflow` start event can precede cancellation
+  and is not evidence that the provider received a summary request. Use the same prepared history
+  in all long-fixture arms so a missing cut point cannot make the suppression test pass vacuously.
 For a veto case, prove a known-bad control reaches the endpoint when the guard is absent.
 For serialization, include non-ASCII text, system instructions, tools and base64 expansion.
 For image processing, decode resized outputs and exercise corrupt/unsupported inputs and failure paths.
@@ -597,3 +641,15 @@ Keep this TODO open if native cancellation/ordering or a required platform remai
 - Public downloads indicate distribution. The community report exercised its author's separate
   filter on Pi 1.5.2/Linux and does not establish package adoption or Windows reliability.
 - A4 replaces the earlier selective-first approach. Q2 remains open for the revised approach.
+
+### Native overflow review
+
+- The pinned source confirms that native Pi handles overflow before settlement. Its omission
+  can predate `session_before_compact`, and compaction preparation can fail before that hook.
+- The proposed coordination now covers both paths. It requires a matched, reducible request
+  before cancellation and a continuation that reuses any native omission.
+- The long-history control recorded `413`, two summary requests and a successful image-free
+  continuation. This establishes the failure mode before adding the managed regression.
+- Corrected A3's label. Candidate loadability supports the upstream-first choice and does not
+  invalidate selective reuse as a technical option.
+- Q2 remains open for the revised plan.
