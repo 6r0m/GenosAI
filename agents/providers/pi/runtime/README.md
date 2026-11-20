@@ -136,6 +136,9 @@ Before reapplying the Pi lifecycle to a legacy shared projection, finish its ses
 Normal profile launches leave legacy base auth/models intact. Explicit lifecycle reapplication
 retires only unchanged owned legacy entries after profile provisioning; base foreign state survives.
 Removal visits owned profile records, including retired IDs, without sweeping other directories.
+Disabled setup checks only valid profile IDs and refuses directory or ownership-file links before
+reading their state. Native package/link removal precedes connection projection cleanup; if native
+package removal fails, that profile's auth/models and ownership record remain unchanged for a normal retry.
 Session links require the exact expected base-history target; cleanup removes the link/junction
 alone. Tampered links or ownership refuse. Native preferences, history and original keys survive.
 

@@ -25,7 +25,7 @@ function snapshotTree(dir) {
 function scopedFixture(t) {
  const o=fixture(t),prefix=path.join(o.root,'runtime'),pkg=path.join(prefix,'node_modules/@earendil-works/pi-coding-agent');
  const cli=path.join(pkg,'dist/bundle/cli.js');fs.mkdirSync(path.dirname(cli),{recursive:true});
- fs.writeFileSync(cli,"if(process.env.PI_TEST_LOCAL_INSTALL_FAIL)process.exit(7);const fs=require('fs'),path=require('path'),dir=process.env.PI_CODING_AGENT_DIR,file=path.join(dir,'settings.json'),data=fs.existsSync(file)?JSON.parse(fs.readFileSync(file)):{};data.packages=(data.packages??[]).filter(x=>x!==process.argv[3]);if(process.argv[2]==='install')data.packages.push(process.argv[3]);fs.writeFileSync(file,JSON.stringify(data));");
+ fs.writeFileSync(cli,"if(process.env.PI_TEST_LOCAL_INSTALL_FAIL || (process.argv[2]==='remove' && process.env.PI_TEST_LOCAL_REMOVE_FAIL))process.exit(7);const fs=require('fs'),path=require('path'),dir=process.env.PI_CODING_AGENT_DIR,file=path.join(dir,'settings.json'),data=fs.existsSync(file)?JSON.parse(fs.readFileSync(file)):{};data.packages=(data.packages??[]).filter(x=>x!==process.argv[3]);if(process.argv[2]==='install')data.packages.push(process.argv[3]);fs.writeFileSync(file,JSON.stringify(data));");
  const catalog=path.join(prefix,'node_modules/@earendil-works/pi-ai/dist/providers/data');fs.mkdirSync(catalog,{recursive:true});
  for(const provider of ['deepseek','other'])fs.writeFileSync(path.join(catalog,provider+'.json'),JSON.stringify({models:{a:{id:'a',api:'openai-completions'},b:{id:'b',api:'openai-completions'}}}));
  return {...o,cli,profileScope:true};
@@ -84,6 +84,49 @@ test('scoped failed provisioning retries and runtime-free removal preserves nati
  await configure({...o,op:'uninstall',cli:undefined});
  assert.deepEqual(JSON.parse(fs.readFileSync(file)),{...settings,packages:['npm:synthetic-foreign']});
  await configure(o);assert.equal(JSON.parse(fs.readFileSync(file)).theme,'synthetic-theme');
+});
+test('scoped package removal failure preserves projections and permits a normal retry',async t=>{
+ const o=scopedFixture(t),{agentDir:dir}=await configure(o);
+ fs.writeFileSync(path.join(o.dir,'sessions/history'),'synthetic-history');
+ const auth=path.join(dir,'auth.json'),original=fs.readFileSync(auth,'utf8');
+ fs.writeFileSync(auth,JSON.stringify({deepseek:{type:'api_key',key:'synthetic-foreign'}}));
+ const drifted=snapshotTree(o.dir);
+ await assert.rejects(configure({...o,op:'uninstall'}),/managed authentication changed/);
+ assert.deepEqual(snapshotTree(o.dir),drifted,'genuine drift must refuse before removing resources');
+ fs.writeFileSync(auth,original);
+ const before=snapshotTree(o.dir),previous=process.env.PI_TEST_LOCAL_REMOVE_FAIL;
+ process.env.PI_TEST_LOCAL_REMOVE_FAIL='1';
+ try {await assert.rejects(configure({...o,op:'uninstall'}),/package remove failed/);}
+ finally {if(previous===undefined)delete process.env.PI_TEST_LOCAL_REMOVE_FAIL;else process.env.PI_TEST_LOCAL_REMOVE_FAIL=previous;}
+ assert.deepEqual(snapshotTree(o.dir),before,'failed native removal must preserve auth, models, ownership and links');
+ await configure({...o,op:'uninstall'});
+ assert.deepEqual(read({dir},'auth.json'),{});
+ assert.deepEqual(read({dir},'models.json').providers,{});
+ assert.deepEqual(read({dir},'agents-sot-state.json').managed,{});
+ assert.deepEqual(read({dir},'settings.json').packages,[]);
+ assert.equal(fs.existsSync(path.join(dir,'sessions')),false);
+ assert.equal(fs.readFileSync(path.join(o.dir,'sessions/history'),'utf8'),'synthetic-history');
+});
+test('scoped disabled setup refuses foreign directory and ownership links before reading them',async t=>{
+ for(const kind of ['directory','ownership'])await t.test(kind,async t=>{
+  const o=scopedFixture(t),outside=path.join(o.root,'outside'),dir=path.join(o.dir,'profiles/foreign');
+  fs.mkdirSync(outside);fs.mkdirSync(path.dirname(dir));
+  // Invalid JSON distinguishes a link refusal from following the foreign ownership file.
+  const external=path.join(outside,'agents-sot-state.json');fs.writeFileSync(external,'foreign-unreadable-json');
+  if(kind==='directory')fs.symlinkSync(outside,dir,process.platform==='win32'?'junction':'dir');
+  else {fs.mkdirSync(dir);fs.symlinkSync(external,path.join(dir,'agents-sot-state.json'),'file');}
+  const before=snapshotTree(o.dir),foreign=snapshotTree(outside);
+  for(const op of ['validate','install']) {
+   await assert.rejects(configure({...o,op,profiles:{active:null,profiles:{}},setup:true}),/symbolic/,kind+' link must refuse without parsing the target');
+   assert.deepEqual(snapshotTree(o.dir),before);assert.deepEqual(snapshotTree(outside),foreign);
+  }
+ });
+ const o=scopedFixture(t),container=path.join(o.dir,'profiles');fs.mkdirSync(container);
+ const outside=path.join(o.root,'ignored');fs.mkdirSync(outside);fs.writeFileSync(path.join(outside,'agents-sot-state.json'),'foreign-unreadable-json');
+ fs.symlinkSync(outside,path.join(container,'invalid.id'),process.platform==='win32'?'junction':'dir');
+ const before=snapshotTree(o.dir),foreign=snapshotTree(outside);
+ await configure({...o,profiles:{active:null,profiles:{}},setup:true});
+ assert.deepEqual(snapshotTree(o.dir),before);assert.deepEqual(snapshotTree(outside),foreign);
 });
 test('scoped launch preserves legacy state and explicit retirement removes only owned entries',async t=>{
  const o=scopedFixture(t);

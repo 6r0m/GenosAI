@@ -491,3 +491,30 @@ billing or production rollout follows from this proof.
   receive the selected view. The exact focused regression (`node --test --test-name-pattern=SOT-only
   agents/tests/providers/pi/config.test.js`) passed on WSL and native Windows. This changed no
   connection selection or paid-test budget; no additional broad suite was needed for that export.
+
+### 2026-11-20 — Uninstall recovery and disabled-setup review
+
+- **Judgment:** both reviewer findings were confirmed in the current projector. Neither requires
+  a change to the native-directory design or the approved scope.
+- **Red evidence:** `node --test --test-name-pattern='scoped (package removal failure|disabled setup)'
+  agents/tests/providers/pi/config.test.js` failed before production edits. A synthetic native `remove`
+  exit left auth/models empty while ownership still recorded them. The separate directory-link and
+  ownership-file-link controls parsed intentionally invalid external JSON instead of refusing the links;
+  an invalid profile ID was also inspected. The existing six scoped cases passed before these additions.
+- **Fix:** owned native package/link removal now runs after ownership validation and before projection
+  cleanup. Failed native removal leaves that profile's auth/models and ownership unchanged, allowing
+  a normal retry. Disabled setup skips invalid IDs and checks child directories and ownership-file
+  links before reading state, using the existing filesystem helpers. Genuine managed-auth drift still
+  refuses before resource removal. The runtime owner documents both failure contracts.
+- **Focused verification:** the exact new regressions passed after the fix; full
+  `node --test agents/tests/providers/pi/config.test.js` passed all 28 checks (26 top-level cases plus
+  two link subcases) on WSL and native Windows. Snapshot assertions cover protected-state preservation,
+  successful retry, history retention and untouched foreign targets. Native Windows exercises directory
+  junctions and file links. `make check`, Node syntax checks and documentation conformance (11 cases)
+  passed. Existing broad-suite filesystem limitations remain separate; no broad suite was rerun for
+  these two local corrections.
+- **Native integration:** `node agents/tests/providers/pi/compatible.js <installed-pi-cli>` passed
+  against the pinned Pi 1.5.2 on WSL and native Windows, including real native package cleanup,
+  16 refusal controls, three retained runtimes/four isolated requests and two permission-loader checks.
+  All inputs were disposable and synthetic; neither run made an external provider request or changed
+  the workstation's active profile state.

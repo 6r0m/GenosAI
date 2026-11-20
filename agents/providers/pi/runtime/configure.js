@@ -286,6 +286,8 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
       atomic(statePath,{root,profile:chosen.active,managed:old,resources});
       provision(dir,resources,cli);
     }
+    // Failed native removal must leave the recorded connection projections available for retry.
+    if(resources && op==='uninstall')removeResources(dir,resources,cli);
     // All ownership/collision checks precede the first write; each promoted file is validated JSON.
     if(!equal(auth, read(authPath)))atomic(authPath, auth);
     if(Object.keys(modelProviders).length || models.providers) {
@@ -293,7 +295,7 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
       if(!equal(models, read(modelsPath)))atomic(modelsPath, models);
     }
     if(op === 'uninstall') {
-      if(resources) {removeResources(dir,resources,cli);atomic(statePath,{root,profile:state.profile,managed:{},resources});}
+      if(resources)atomic(statePath,{root,profile:state.profile,managed:{},resources});
       else if(fs.existsSync(statePath))fs.unlinkSync(statePath);
       return {profile: null, provider: null, model: null, thinking: null};
     }
@@ -329,7 +331,13 @@ async function configureProfile(options) {
   }
   if(!chosen) {
     if(op==='inspect') {if(!stat(base))throw Error('native Pi directory not initialized');return {agentDir:base};}
-    if(stat(container) && fs.readdirSync(container).some(name=>Object.values(read(path.join(container,name,'agents-sot-state.json')).managed??{}).some(entries=>Object.keys(entries).length)))throw Error('existing managed connection requires a configured profile');
+    if(stat(container))for(const name of fs.readdirSync(container)) {
+      if(!ID.test(name))continue;
+      const dir=path.join(container,name),statePath=path.join(dir,'agents-sot-state.json');
+      ordinaryDirectory(dir);
+      if(stat(statePath)?.isSymbolicLink())throw Error('symbolic native profile file refused');
+      if(Object.values(read(statePath).managed??{}).some(entries=>Object.keys(entries).length))throw Error('existing managed connection requires a configured profile');
+    }
     return {...await project({...options,profiles:{active:null,profiles:{}},profileScope:false}),agentDir:base};
   }
   const dir=path.join(container,chosen.active);ordinaryDirectory(dir);
