@@ -29,6 +29,8 @@ Allow optional Pi extensions to apply to every managed run or only selected run 
 using the existing configuration and installation workflow. Provide an opt-in image budget
 that reduces outbound image payloads before provider limits prevent further requests,
 without compacting text or rewriting saved image originals and conversation records.
+Keep the unblocker replaceable behind a narrow adapter boundary, with supported policy changes
+driven by configuration rather than edits scattered across the integration.
 
 ## Authority register
 
@@ -47,6 +49,12 @@ without compacting text or rewriting saved image originals and conversation reco
   - Effect: assess native Pi loading and existing lifecycle ownership before adding machinery.
   - Reason: simple extension reuse across differently configured profiles.
   - Date/source: operator request, 2026-11-20.
+- **D4:** Unblocker code should be flexible, quickly adjustable through configuration, and
+  architecturally treated as an external black box wherever practical.
+  - Effect: separate algorithm implementation from GenosAI configuration, lifecycle and
+    safety enforcement; keep the adapter contract small and implementations replaceable.
+  - Reason: quick changes to unblocker behavior as restrictions change.
+  - Date/source: operator follow-up request, 2026-11-20.
 
 ### Operator gates
 
@@ -70,6 +78,9 @@ file, automatic remote uploads, secret copying, network diagnosis, or general re
 No unrelated provider refactor. No promise to isolate existing shared native authentication
 projections between concurrent mixed-provider sessions. No inference that a socket reset proves
 a request-size failure. Public defaults remain unconfigured and optional plugins disabled.
+No provider-wide interception of compaction, branch summaries or independent nested SDK calls.
+No live code fetching, arbitrary configuration-supplied imports, persistent image-consumption
+ledger without demonstrated need, or promise to police arbitrary third-party payload transformers.
 
 ## Verified evidence
 
@@ -98,14 +109,34 @@ a request-size failure. Public defaults remain unconfigured and optional plugins
   `emitBeforeProviderRequest()`, catches handler exceptions and returns the current payload.
   This behavior was also inspected in the installed 1.5.2 distribution. A thrown hook error is
   **not** a demonstrated request veto. Later hooks receive earlier hooks' returned payloads.
+- [Pi 1.5.2 resource loader](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/src/core/resource-loader.ts)
+  merges CLI extension paths before normally enabled paths. Thus optional `-e` loading does
+  not make an image-budget handler the final handler across arbitrary installed extensions.
+  The existing managed permission adapter has session/tool handlers, not a payload transformer.
+- [Pi 1.5.2 OpenAI-compatible transport](https://github.com/earendil-works/pi/blob/v1.5.2/packages/ai/src/api/openai-completions.ts)
+  invokes `onPayload` before the SDK request and forwards the abort signal to the request and
+  retry wrapper. The extension context exposes `ctx.abort()`. These are a plausible cancellation
+  path, not proof that invoking it inside this hook prevents every dispatch/retry.
+- [Pi issue 9773](https://github.com/earendil-works/pi/issues/9773) reports missing hooks for
+  summaries/compaction on 0.85.1. Inspection of 1.5.2's
+  [compaction options](https://github.com/earendil-works/pi/blob/v1.5.2/packages/coding-agent/src/core/compaction/compaction.ts)
+  and branch-summary request options also finds no agent-turn `onPayload` callback in those
+  option builders. The extension must not claim universal coverage of native model calls.
 - [DeepSeek vision limits](https://api-docs.deepseek.com/guides/vision/#limits)
   distinguish the 48 MiB JSON-body limit from per-image limits; inline base64 contributes to
-  that body. A gateway may impose a different ceiling. Count-only filtering is insufficient.
+  that body. Direct requests also have a documented image-count ceiling of 600. A gateway
+  may impose different byte/count ceilings. Neither count-only nor byte-only filtering suffices.
 - [Pi issue 9579](https://github.com/earendil-works/pi/issues/9579) discusses native per-image
   sizing and temporary image blocking. Those are useful controls, not evidence of automatic
   aggregate-byte recovery. [Issue 10162](https://github.com/earendil-works/pi/issues/10162)
   provides community reports of route-specific limits and outbound filtering, not proof for
   every platform or extension combination.
+- [The Pi 1.5.2/Linux workaround report](https://github.com/earendil-works/pi/issues/10162#issuecomment-6806831696)
+  describes successful request-only filtering for observed gateway caps of 20 and 8, including
+  a 25-image request succeeding with filtering and failing without it. This is author-reported
+  evidence, not an independently rerun acceptance result or a stable limit for those model names.
+  [A separate 503 report](https://github.com/earendil-works/pi/issues/10162#issuecomment-6719166976)
+  demonstrates why an ambiguous server error cannot safely identify an image-count rejection.
 - [pi-image-budget source](https://github.com/Aaalice233/pi-image-budget/blob/main/src/index.ts)
   and [package](https://github.com/Aaalice233/pi-image-budget/blob/main/package.json), observed
   version 0.2.0: compression, payload measurement and bounded recovery are useful references.
@@ -126,9 +157,10 @@ no images can be removed. It also reads independent user/project configuration a
 recovery/custom session entries. Preserving original records is different from keeping the entire
 session file byte-identical. Do not describe upstream as an unmodified fit or a proven hard guard.
 
-The exact cancellation mechanism, ordering against other payload transformers, Windows native
-loading, resumed-session behavior and bounded recovery on pinned Pi remain implementation
-acceptance gates. Do not claim any socket error is cured by this feature.
+Zero-dispatch cancellation, the supported managed ordering, Windows native loading,
+resumed-session behavior and bounded recovery on pinned Pi remain implementation acceptance
+gates. Third-party final-payload ordering is not guaranteed. Do not claim any socket error is
+cured by this feature.
 
 ## Current architecture and source of truth
 
@@ -149,6 +181,8 @@ an optional extension globally would affect unrelated runs unless it gates itsel
 Separately, individually acceptable images can accumulate into a request exceeding a provider's
 body limit while remaining below a token compaction threshold. Compaction changes conversational
 context and does not provide a precise byte budget for that outgoing request.
+Small images can independently exceed route image-count limits while remaining far below a
+body-size ceiling. These constraints require separate checks against the same effective route.
 
 ## Decision
 
@@ -175,6 +209,41 @@ or directory glob. Preserve foreign native resources and existing argument/envir
 This is native extension selection, not a second installer. A reviewed extension can be used
 globally or per profile without acquiring it again. No launch-time network acquisition.
 
+Loading order is a supported-composition contract, not a universal final-hook guarantee.
+Order GenosAI-managed payload transformers deterministically, with budget validation after
+the managed payload-growing transformations. Test that actual order, not just argv construction.
+Do not disable or reorder foreign resources to manufacture this guarantee: independently loaded
+third-party hooks may still run afterward. A combination with an unverified later transformer is
+outside the guarded-composition claim and must be reported as such, not silently certified.
+If arbitrary-extension coverage is later required, it needs a genuine last-stage transport guard
+and separate review; this task does not add that framework.
+
+### Replaceable unblocker boundary
+
+Following D4, treat the algorithm as an external dependency behind a thin Pi-owned adapter,
+even if its audited source ships inside the managed package. This is a module boundary, not
+a separate process, service or new package manager. GenosAI owns selection, validated route
+options, native integration and final refusal; the replaceable algorithm owns image selection,
+compression planning and candidate construction. A library's warning or success flag is not
+authority to bypass GenosAI's size/count checks.
+
+Use one small explicit contract: receive outbound copies, resolved route limits/options and
+the current conversation boundary; return a candidate plus reduction/omission diagnostics or
+an explicit cannot-fit result. Keep original messages, credentials, native settings, provider
+calls and retry scheduling outside that algorithm's ownership. GenosAI independently measures
+the candidate through the supported native route. This is separation of responsibility, not
+a sandbox: reviewed in-process extensions still have the host process's permissions.
+
+The same private configuration selects the reviewed implementation ID and its supported
+options. Changing route `maxRequestBytes`, `maxImages`, recent-image retention or supported
+compression policy takes effect on next launch without source edits, package registration
+changes or runtime reinstall. Switching between already shipped compatible implementations
+uses that same selection. Adding a new implementation requires an audited pinned source and
+its adapter/validator/tests, but must not require changes to generic lifecycle or launcher code.
+Do not promise configuration can express a new algorithm or load unreviewed code.
+Start with one production implementation; use a synthetic second adapter to prove replaceability
+without building an unused framework. Unknown options/IDs refuse rather than falling back.
+
 The first optional extension is an image-budget adapter, using pinned/audited upstream helpers
 where useful (A3). It accepts resolved options rather than consulting upstream user/project
 config files. Reuse native resizing; retain MIT notices for copied code. Avoid importing all
@@ -190,22 +259,39 @@ aborted or partial generations do not prove an image was processed. If protected
 fit after permitted resizing, refuse clearly rather than silently dropping it. Historical image
 omission is visible to the model and user and never means an image's content remains recoverable
 from text alone. All original messages, images and tool-result identities remain available.
+Derive new/unprocessed images from the active conversation branch and current request boundary
+where possible, including images introduced by tools mid-turn. Test retry, abort, fork and resume
+boundaries first. Ambiguous processing state remains protected; do not introduce a persistent
+consumption ledger unless these tests establish that existing boundaries cannot satisfy the rule.
 
-Measure UTF-8 serialized request bytes, including system/tools/text/base64 overhead, after
-provider conversion. Use an explicitly configured route ceiling; a conservative 40 MiB target
+Measure UTF-8 serialized request bytes, including system/tools/text/base64 overhead, and count
+all supported image blocks after provider conversion. Keep `maxRequestBytes` and `maxImages`
+as independent validated per-route options and satisfy both. Do not infer gateway caps from
+the provider/model name. Use an explicitly configured route ceiling; a conservative 40 MiB target
 for a documented 48 MiB direct route is an example, not a global DeepSeek default.
 
-**Technical gate:** first prove a native mechanism that prevents dispatch on unmeasurable or
-still-oversized payloads. Test it against the actual 1.5.2 transport and a later payload-growing
-extension. Throwing in a hook, issuing a warning, or returning invalid payloads is not acceptable.
+**Coverage:** guarantees apply to supported normal agent-turn requests (including subsequent
+tool-loop requests) on the tested API/transport and managed extension composition. They do not
+cover compaction, branch summaries, independent nested model calls or arbitrary later third-party
+transformers. Document and test this boundary rather than calling the hook provider-wide.
+
+**Technical gate:** first test `ctx.abort()` inside the payload hook against an actual 1.5.2
+recording local endpoint. Oversized, over-count and intentionally unmeasurable candidates must
+produce zero HTTP requests, including with native retries enabled and after the run settles.
+A caught throw may accompany an abort for diagnostics; throwing alone, warning, or returning
+invalid payloads is not acceptable. Test managed payload-growing handlers before validation,
+and a later foreign handler as a negative control for the documented ordering boundary.
 Inspect cancellation and serialization ordering before implementation depends on them. If no
 supported mechanism meets this invariant, stop that path and return for review; do not silently
 weaken the guard or fork the provider/runtime.
 
-Retry only a confirmed size rejection, only with an observably smaller measured request, and
-within one bounded recovery allowance coordinated with Pi's native retry/settle behavior.
-Generic connection resets, auth failures and rate limits are not size evidence. If text/tools
-alone exceed the ceiling, stop with an actionable error; do not compact or retry unchanged input.
+Retry only a confirmed byte/count rejection, only with a measured reduction in the rejected
+dimension while satisfying both configured limits, and with at most one plugin recovery per
+input coordinated with Pi's native retry/settle behavior. Aborts must not schedule recovery.
+Generic connection resets, auth failures, rate limits and ambiguous 503 responses are not
+image-limit evidence. Their existing native behavior must not gain plugin image-recovery loops.
+If text/tools alone exceed the ceiling, stop with an actionable error; do not compact or retry
+unchanged input.
 
 ### Premise / KISS gate
 
@@ -234,21 +320,25 @@ marketplace acquisition and hot-changing the plugin set inside an active process
 4. No implicit runtime upgrade, global npm change, plugin credential reads or package downloads at launch.
    Native model authentication remains with its existing owner; verification uses no paid calls.
 5. Saved originals and text are preserved; omission markers cannot replace unrelated text or tool IDs.
-6. Actual serialized bytes govern the route budget; unknown measurement cannot produce a success result.
-7. Oversized/unmeasurable opted-in requests cannot reach transport; later transformations cannot bypass this proof.
+6. Actual serialized bytes and image count govern independent route budgets; unknown measurement cannot produce a success result.
+7. For the declared agent-turn transport and managed ordering, oversized/over-count/unmeasurable
+   opted-in requests cannot reach transport. No universal final-hook or nested-call coverage is claimed.
 8. Unmatched/non-opted-in routes are unchanged. Recovery budgets and learned limits never leak across routes.
 9. Reapply is idempotent; uninstall removes owned resources only and preserves unrelated native files.
 10. Diagnostics expose counts, bytes, route match, action and retry reason without bodies, images or secrets.
+11. D4's adapter boundary keeps algorithm changes local; supported option changes and selection of
+    shipped implementations require only configuration and next launch, with safety checks unchanged.
 
 ## Implementation tasks
 
-- [ ] After Q1, prove the request-veto/ordering technical gate with installed Pi and a recording local provider before adopting a budgeting implementation.
+- [ ] After Q1, prove `ctx.abort()` zero-dispatch refusal and managed ordering with installed Pi and a recording local provider before adopting a budgeting implementation. Record unsupported call paths and the later-foreign-hook negative control.
 - [ ] Add failing feature/regression cases below using [configuration tests](../agents/tests/providers/pi/config.test.js), [private input tests](../agents/tests/test_private_config.py), [platform tests](../agents/tests/test_platform_paths.py) and [native transport fixtures](../agents/tests/providers/pi/transport.js).
 - [ ] Extend `config.py` and `runtime/configure.js` at their existing schema/snapshot boundaries; support global plugins even when no connection profile is configured for setup. Keep normal bare launch refusal intact.
 - [ ] Extend `runtime/launch.sh` with deterministic native optional-extension selection and process-local non-secret options. Reuse Windows transport/path helpers when needed; preserve foreign environment entries and opaque prompt arguments.
 - [ ] Add the smallest Pi-owned optional entrypoint/ID resolver needed for the selected contract. Keep optional modules out of unconditional manifest discovery; retain the existing mandatory package.
+- [ ] Establish D4's thin adapter contract and validate byte/count/policy options at the existing input boundary. Demonstrate two configurations and a synthetic replacement implementation without changing lifecycle/launcher code or reading an independent plugin config file.
 - [ ] Select an immutable upstream revision, audit helper dependencies/license, and integrate only needed budgeting/resizing logic. Add provenance/notices and exact source admission for incorporated files; no floating source reference in shipped code.
-- [ ] Implement scoped budgeting, protected-image policy, confirmed bounded recovery and observable refusal; verify both OpenAI-compatible payload handling and no-op behavior for unsupported routes.
+- [ ] Implement independent scoped byte/count budgets, boundary-derived protected-image policy, confirmed bounded recovery and observable refusal; verify supported OpenAI-compatible payload handling and explicit coverage/no-op behavior for unsupported routes.
 - [ ] Exercise existing install/uninstall, source-move ownership, credential-free setup and second-apply checks. Change lifecycle code only where an acceptance case demonstrates a missing responsibility.
 - [ ] Update stable owners below and register new source/test files through [source disposition](../tools/source-manifest.json). Resolve this TODO's own disposition explicitly before release checks; it is currently not an admitted export file.
 - [ ] Run the full declared matrix, inspect the complete diff, and request renewed review if the technical gate requires a different design.
@@ -263,13 +353,16 @@ Use generated public images, synthetic keys and local recording endpoints only.
 | Case / evidence type | Wrong or missing behavior to demonstrate before implementation |
 |---|---|
 | Global/profile selection — permanent guard | New plugin fields are refused today; no global/profile union, deduplication or override contract exists. |
+| Configurability/replaceability — permanent guard + acceptance | Change limits/policy and select a synthetic alternate adapter using only configuration and next launch; verify different outbound results, unchanged source/native registration and identical independent safety enforcement. |
 | Validation/no mutation — permanent guard | Establish unsupported ID/options/budget and inherited-environment controls; verify refusals leave native files unchanged. |
 | Native lifecycle — acceptance | Installed route cannot yet enable one optional extension only for a selected profile while preserving guard/foreign extensions. |
-| Aggregate bytes — permanent guard + native acceptance | Multiple individually valid synthetic images exceed a local body ceiling and the current route sends an oversized request. Test a small gateway ceiling and 48 MiB boundary. |
-| Request veto — permanent guard + native acceptance | A throwing hook currently does not prove zero dispatch. Record actual request count for oversize, measurement failure and a later payload-growing hook. |
+| Aggregate bytes — permanent guard + native acceptance | Multiple individually valid synthetic images exceed a local body ceiling and the current route sends an oversized request. Test reduction from above 40 MiB, a smaller gateway ceiling and the 48 MiB boundary. |
+| Image count — permanent guard + native acceptance | Tiny images pass byte checks but exceed a local 20/30-image cap; cover an 8-image option, exact-cap boundaries, and both constraints simultaneously. No model-name-derived global cap. |
+| Request veto — permanent guard + native acceptance | A throwing hook currently does not prove zero dispatch. Test `ctx.abort()` for oversize, over-count and measurement failure with native retries enabled; record zero HTTP requests through settlement. |
+| Ordering/coverage — permanent guard + native acceptance | Show a later foreign hook can invalidate an earlier check; prove managed growth precedes the guard and do not claim the foreign case is protected. Inspect/test normal turns versus compaction/branch/nested paths to delimit hook coverage. |
 | Protected images/history — permanent guard | Define current/unprocessed and successful-answer history, then demonstrate missing outbound reduction; assert original records/text/images remain intact after reduction, retry and resume. |
 | Route switching — permanent guard | Cover matched opt-in, non-opt-in, differing endpoint/API/model, native model switch and two process-local selections without shared plugin-setting mutation. |
-| Recovery — permanent guard + native acceptance | Local 413 then success must show smaller bytes; repeated 413, text-only overflow, reset/401/429, abort and native retry interaction must not produce an uncontrolled continuation. |
+| Recovery — permanent guard + native acceptance | Local 413 then success must show smaller bytes and at most one plugin recovery; explicit count rejection must reduce count. Repeated rejection, text-only overflow, ambiguous 503, reset/401/429, abort and native retry interaction must not produce an uncontrolled continuation. |
 | Platform/reapply/removal — acceptance | Real Windows and WSL native launchers must load the selected local entrypoints with Unicode/spaced paths; second install and owned removal preserve sentinels. |
 | KISS/source/privacy — reviewer judgment | Check sole ownership, dependency/provenance scope, no extra operator config, and no private operational material. Do not replace this judgment with text-presence tests. |
 
@@ -312,7 +405,8 @@ not a mocked PASS. Paid provider calls are unnecessary for this acceptance.
 - **Router / TOC update:** update an existing owner only if it gains a child owner; do not introduce
   a documentation subtree just for this bounded change.
 - **Content:** options ownership, global/profile precedence, reapply/next-launch behavior, route scope,
-  omission/refusal semantics, diagnostics and supported native acceptance.
+  replaceable adapter boundary, configurable byte/count policies, managed ordering and excluded call
+  paths, omission/refusal semantics, diagnostics and supported native acceptance.
 - **Duplication avoided:** examples reference the executable schema; package pins/provenance have one
   owner. Stable docs, code, comments and tests must not reference this transient TODO.
 
@@ -327,8 +421,10 @@ lifecycle removal, preserving foreign resources. Do not add a separate rollback 
 ## Completion criteria
 
 Q1 must be resolved before implementation. Completion requires recorded red/green evidence for the
-matrix, proven zero-dispatch refusal and actual serialized byte bounds, preserved originals/text,
-global/profile isolation, idempotent lifecycle/removal, and real Windows/WSL installed-route proof.
+matrix, proven zero-dispatch refusal and actual serialized byte/count bounds for the declared
+agent-turn transport/composition, preserved originals/text, configuration-only policy/adapter
+selection changes, global/profile isolation, idempotent lifecycle/removal, and real Windows/WSL
+installed-route proof. Unsupported third-party ordering and summary/nested calls are explicit exclusions.
 All existing required checks must pass with explicit source disposition. License/provenance and
 public-information review must be complete. No unverified community reliability claim, private
 session replay, runtime fork, extra configuration authority or unrelated diff may substitute for proof.
@@ -349,3 +445,19 @@ Keep this TODO open if native cancellation/ordering or a required platform remai
 - **Verification:** read-only owner/source inspection and public upstream review. No implementation,
   lifecycle change, provider request or installed-route acceptance performed for this investigation.
 - **Authority:** D1–D3 recorded; Q1 remains open; A1–A3 are proposals, not operator approval.
+
+### 2026-11-20 — Configurable boundary and source-audit follow-up
+
+- **Trigger:** D4 and reviewer F1–F5.
+- **Assessment:** F1 accepted as an experiment, not a proven veto; F2 accepted because CLI-first
+  loading invalidates an arbitrary-extension final-hook promise; F3 accepted as a separate route
+  count budget; F4 accepted with the issue's older version distinguished from inspected 1.5.2;
+  F5 retained as a reference/adaptation constraint. No reviewed finding establishes runtime PASS.
+- **Changes:** added the replaceable module contract and configuration-only acceptance; narrowed
+  ordering/call-path claims; added abort/count/503/boundary tests and avoided a speculative ledger.
+- **Qualification:** reported gateway caps are observations, not permanent provider defaults.
+  `ctx.abort()` is an exposed helper, but hook-level zero-dispatch semantics remain unverified.
+  A black-box module boundary does not imply sandboxing of an in-process extension.
+- **Verification:** read-only pinned runtime inspection and public primary-source review; document
+  links, diff, privacy and secret checks. No implementation or provider request performed.
+- **Authority:** D4 added; Q1 remains open.

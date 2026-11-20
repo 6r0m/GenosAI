@@ -28,6 +28,10 @@ synthetic regression coverage. `secrets/` files are private; inspect references/
 validators, generated/native projections and failure behavior. Keep one canonical source and each native
 writer's approval/version/collision protections. Public defaults must not inherit private machine choices.
 
+Tracked means published and a leak here has no undo, so a new file takes an explicit public/private
+decision instead of defaulting to public: admitted in the [source manifest](tools/source-manifest.json), or
+kept in the private locations above. [Source preparation](docs/preparation.md) owns the requirements.
+
 Before cutover, verify an independently extracted artifact in synthetic homes with the old source unavailable.
 Preserve local input and native foreign state; transfer ownership through existing owners. Public release
 also requires license/provenance review, explicit publication authorization and anonymous
