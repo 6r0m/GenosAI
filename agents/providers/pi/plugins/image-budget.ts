@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {resizeImage} from '@earendil-works/pi-coding-agent';
+import {revision as imageBudgetRevision} from '../runtime/image-engine.js';
 import {normalizeEndpoint} from '../runtime/plugins.js';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
@@ -70,7 +71,6 @@ export default async function imageBudget(pi) {
   const load = name => import(pathToFileURL(path.join(launch.engine,'src',name+'.ts')).href);
   const [{planImageBudget},{DEFAULT_CONFIG},{classifyError},{imageDimensions},{jsonSize},{scrubPayload},{ImageProcessor}]
     = await Promise.all(['budget','config','errors','image','json-size','payload','resize'].map(load));
-  const measured = payload => ({payload, bytes:jsonSize(payload), count:imageParts(payload).length});
 
   const limits = {
     ...DEFAULT_CONFIG, ...options, dedupe:false,
@@ -78,7 +78,13 @@ export default async function imageBudget(pi) {
     protectRecent:options.protectRecent ?? Math.min(2,options.maxImages),
   };
   const historyType = 'genosai-image-budget';
-  const routeKey = createHash('sha256').update(JSON.stringify(launch)).digest('hex');
+  const {provider,id,api,baseUrl} = launch.route;
+  const routeKey = createHash('sha256').update(JSON.stringify({
+    profile:launch.profile,
+    route:{provider,id,api,baseUrl},
+    options:Object.keys(options).sort().map(key=>[key,options[key]]),
+    revision:imageBudgetRevision,
+  })).digest('hex');
   const learned = ctx => {
     const entry = ctx.sessionManager.getBranch().findLast(
       item=>item.type==='custom' && item.customType===historyType && item.data?.key===routeKey);
@@ -97,23 +103,21 @@ export default async function imageBudget(pi) {
     report(ctx, 'request refused: '+reason);
     ctx.abort();
   };
-  const protectIds = new Set();
-  const knownUrls = new Set();
-  let contextKnown = false;
+  let projectedImages;
   let last, pending, retryLimit;
   let recovered = false;
-  const clear = () => {last = pending = retryLimit = undefined; protectIds.clear(); knownUrls.clear(); contextKnown = false;};
+  const clear = () => {last = pending = retryLimit = projectedImages = undefined;};
   const reset = () => {clear(); recovered = false;};
   for (const event of ['session_start','session_tree','input','model_select','agent_settled']) {
     pi.on(event, reset);
   }
 
-  async function finalize(payload, maxBytes, maxImages, protect) {
+  async function finalize(payload, maxBytes, maxImages, protectedImages) {
     const candidate = structuredClone(payload);
-    const fixed = imageParts(candidate).filter(protect);
+    const fixed = new Set(imageParts(candidate).filter((_,index)=>protectedImages[index] !== false));
     // Keep protected images in the measured body while excluding them from the removal pass.
     for (const part of fixed) part.type = 'protected';
-    const target = scrubPayload(candidate,jsonSize(candidate),maxBytes,0,{maxImages:Math.max(0,maxImages-fixed.length)});
+    const target = scrubPayload(candidate,jsonSize(candidate),maxBytes,0,{maxImages:Math.max(0,maxImages-fixed.size)});
     for (const part of fixed) part.type = 'image_url';
     const parts = imageParts(target.payload);
     const maxDimension = parts.length >= (options.denseImageCount ?? Infinity)
@@ -131,30 +135,29 @@ export default async function imageBudget(pi) {
         }
       }
     }
-    const result = measured(candidate);
-    if (result.bytes > maxBytes || result.count > maxImages) {
-      throw Error(`${result.bytes} bytes, ${result.count} images exceed the configured request limits`);
+    const bytes = jsonSize(candidate), count = parts.length;
+    if (bytes > maxBytes || count > maxImages) {
+      throw Error(`${bytes} bytes, ${count} images exceed the configured request limits`);
     }
-    return {...result, omitted:target.removed};
+    return {payload:candidate,bytes,count,omitted:target.removed,protectedImages:parts.map(part=>fixed.has(part))};
   }
 
   pi.on('context', async ({messages},ctx) => {
-    protectIds.clear();
-    knownUrls.clear();
-    contextKnown = false;
+    projectedImages = undefined;
     if (!matches(ctx)) return;
     // Only a completed answer closes the image protection boundary.
     const lastAnswer = messages.findLastIndex(m=>m.role==='assistant' && m.stopReason==='stop');
-    const images = messages.flatMap((message,index) => Array.isArray(message.content)
-      ? message.content.filter(part => part.type==='image').map(part=>({index,data:part.data})) : []);
-    const recent = new Set((limits.protectRecent ? images.slice(-limits.protectRecent) : []).map(image=>image.data));
+    let remaining = messages.reduce((count,message)=> count + (Array.isArray(message.content)
+      ? message.content.filter(part=>part.type==='image').length : 0),0);
     const active = retryLimit ?? learned(ctx);
     try {
       const fixed = new Map();
       const planning = messages.map((message,index) => {
         if (!Array.isArray(message.content)) return message;
         const content = message.content.map(part => {
-          if (part.type!=='image' || (index<=lastAnswer && !recent.has(part.data))) return part;
+          if (part.type!=='image') return part;
+          const recent = remaining-- <= limits.protectRecent;
+          if (index<=lastAnswer && !recent) return part;
           const protectedImage={...part,type:'fixed'};
           fixed.set(protectedImage,part);
           return protectedImage;
@@ -167,42 +170,43 @@ export default async function imageBudget(pi) {
         sticky:new Map(),overheadBytes:0,
         transform:(ref,spec)=>transform(ref.block.data,ref.mimeType,spec.maxDimension,spec.maxBytes),
       });
+      const outgoing = [];
       const output = plan.messages.map(message => Array.isArray(message.content)
-        ? {...message,content:message.content.map(part=>fixed.get(part)??part)} : message);
-      const outgoing = output.flatMap((message,index) => Array.isArray(message.content)
-        ? message.content.filter(part=>part.type==='image')
-          .map(part=>({index,url:'data:'+part.mimeType+';base64,'+part.data}))
-        : []);
-      const keepStart = outgoing.length-limits.protectRecent;
-      for (const [position,{index,url}] of outgoing.entries()) {
-        knownUrls.add(url);
-        if (index>lastAnswer || position>=keepStart) protectIds.add(url);
-      }
-      contextKnown = true;
+        ? {...message,content:message.content.map(part=>{
+          const original = fixed.get(part);
+          const block = original ?? part;
+          if (block.type==='image') {
+            outgoing.push({url:'data:'+block.mimeType+';base64,'+block.data,protected:original!==undefined});
+          }
+          return block;
+        })} : message);
+      projectedImages = outgoing;
       if (plan.stats.omittedImages || plan.stats.resizedImages) {
         report(ctx,`${outgoing.length} images kept, ${plan.stats.omittedImages} omitted, ${plan.stats.resizedImages} resized`,'warning');
       }
       return plan.changed ? {messages:output} : undefined;
     } catch {
       // A caught context hook error must still prevent dispatch.
-      contextKnown = false;
+      projectedImages = undefined;
     }
   });
 
   pi.on('before_provider_request', async ({payload},ctx) => {
     last = pending = undefined;
     if (!matches(ctx)) return;
-    if (!contextKnown) return refuse(ctx,'image protection could not be established');
+    if (!projectedImages) return refuse(ctx,'image protection could not be established');
     const active = retryLimit ?? learned(ctx);
     try {
-      const protectedUrls = new Set(protectIds);
-      const known = new Set(knownUrls);
-      const protect = part => protectedUrls.has(imageUrl(part)) || !known.has(imageUrl(part));
-      const result = await finalize(payload,active.bytes,active.count,protect);
+      const parts = imageParts(payload);
+      // Pi serializes user and tool images in order. An ambiguous alignment makes every wire image protected.
+      const aligned = parts.length===projectedImages.length &&
+        parts.every((part,index)=>imageUrl(part)===projectedImages[index].url);
+      const protectedImages = parts.map((_,index)=>!aligned || projectedImages[index].protected);
+      const result = await finalize(payload,active.bytes,active.count,protectedImages);
       if (retryLimit && (retryLimit.kind==='request-bytes' ? result.bytes>=retryLimit.previous : result.count>=retryLimit.previous)) {
         return refuse(ctx,'recovery did not reduce the rejected request metric');
       }
-      last = {...result,protect};
+      last = result;
       if (result.omitted) report(ctx,`${result.omitted} older images omitted from ${result.bytes} byte request`,'warning');
       return result.payload;
     } catch (error) {
@@ -221,7 +225,7 @@ export default async function imageBudget(pi) {
     const bytes = rejection.kind==='request-bytes' ? Math.min(active.bytes,Math.floor(last.bytes*0.9)) : active.bytes;
     const count = rejection.kind==='image-count' ? Math.min(active.count,rejection.quotedLimit) : active.count;
     try {
-      const reduced = await finalize(last.payload,bytes,count,last.protect);
+      const reduced = await finalize(last.payload,bytes,count,last.protectedImages);
       const previous = rejection.kind==='request-bytes' ? last.bytes : last.count;
       const next = rejection.kind==='request-bytes' ? reduced.bytes : reduced.count;
       if (next<previous) pending = {message,bytes,count,previous,kind:rejection.kind};

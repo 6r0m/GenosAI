@@ -3,7 +3,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 
-const revision = '742e9f0afd1e303117fa28c41c9ef50b9b7e3d66';
+export const revision = '742e9f0afd1e303117fa28c41c9ef50b9b7e3d66';
 const source = 'git:github.com/Aaalice233/pi-image-budget@' + revision;
 const digest = '6bdca5e7e09c9664540417e1808b8beddbc503402a75a87cf2d482b280a2a78e';
 const modules = ['budget.ts', 'config.ts', 'errors.ts', 'image.ts', 'json-size.ts', 'payload.ts', 'resize.ts'];

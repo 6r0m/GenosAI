@@ -710,4 +710,16 @@ Keep this TODO open if native cancellation/ordering or a required platform remai
 - A separate fresh public export acquired the pinned runtime with `PLATFORM=both RUNTIME=1`,
   with no provider credentials. Both launchers showed version and help and refused unconfigured
   sessions. Removal preserved unrelated native files on both platforms.
+
+### Image identity review
+
+- The unchanged adapter refused a request with three identical historical screenshots under a
+  two-image cap. With occurrence tracking, the newest screenshot reached the loopback gateway.
+  On both pinned runtimes, a 413 with four identical screenshots recovered with two images and
+  retained the newest occurrence. A fixture that inserted an unmatched wire image produced zero
+  dispatches under the same count cap.
+- The path-keyed adapter repeated a 413 after reacquiring the same upstream revision at a new
+  checkout path. The corrected adapter resumed with one successful request on WSL and Windows,
+  even with the budget option keys reordered. Each fixture verified byte-identical saved history
+  prefixes. Previously recorded path-keyed limits can be learned again as needed.
   The loopback evidence above covers the pinned dependency acquisition and its managed integration.

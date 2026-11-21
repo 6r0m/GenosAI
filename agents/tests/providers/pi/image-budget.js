@@ -45,7 +45,9 @@ const server=http.createServer(async(req,res)=>{
   for await (const chunk of req)chunks.push(chunk);
   const body=Buffer.concat(chunks),request=JSON.parse(body);
   const summary=request.messages.some(m=>typeof m.content==='string' && m.content.includes('You are a context summarization assistant'));
-  const images=request.messages.flatMap(m=>Array.isArray(m.content)?m.content.filter(p=>p.type==='image_url').map(p=>p.image_url.url):[]);
+  const imageMessages=request.messages.filter(m=>Array.isArray(m.content) && m.content.some(p=>p.type==='image_url'));
+  const images=imageMessages.flatMap(m=>m.content.filter(p=>p.type==='image_url').map(p=>p.image_url.url));
+  const imageLabels=imageMessages.map(m=>m.content.find(p=>p.type==='text')?.text);
   const first=requests.length===0;
   const gatewayLimit = scenario.startsWith('large') ? 48*1024**2 : 240000;
   const countCap = scenario==='count-overflow' ? 20 : Infinity;
@@ -61,7 +63,7 @@ const server=http.createServer(async(req,res)=>{
       status=413; message='Request exceeds the maximum size'; code='request_too_large';
     }
   }
-  requests.push({bytes:body.length,summary,images,status,model:request.model});
+  requests.push({bytes:body.length,summary,images,imageLabels,status,model:request.model});
   if(status!==200){
     res.writeHead(status,{'content-type':'application/json'}).end(JSON.stringify({
       error:{message,code},
@@ -132,7 +134,7 @@ async function runRpc(args,env,streamFile,commands) {
   } finally {clearTimeout(timer);}
 }
 
-async function run(name, options, {keepRecentTokens=128, file=seed(), expectedPrompt='continue with the screenshots', mode='json', commands=[{type:'compact'}]}={}) {
+async function run(name, options, {keepRecentTokens=128, file=seed(), expectedPrompt='continue with the screenshots', mode='json', commands=[{type:'compact'}], extensions=[]}={}) {
   scenario=name;requests.length=0;
   fs.writeFileSync(path.join(agent,'settings.json'),JSON.stringify({
     retry:{enabled:true,maxRetries:1,provider:{maxRetries:1,timeoutMs:3000}},
@@ -147,7 +149,7 @@ async function run(name, options, {keepRecentTokens=128, file=seed(), expectedPr
   if(options)env.PI_SOT_PLUGINS=JSON.stringify({route:{provider,id:model,api:'openai-completions',baseUrl},profile:'fixture',engine,plugins:{'image-budget':options}});
   const args=[
     cli,'--provider',provider,'--model',model,'--session',file,'--no-mcp','--no-tools',...(mode==='text'?['-p']:['--mode',mode]),
-    ...(options?['-e',plugin]:[]),...(mode==='rpc'?[]:[expectedPrompt]),
+    ...extensions.flatMap(file=>['-e',file]),...(options?['-e',plugin]:[]),...(mode==='rpc'?[]:[expectedPrompt]),
   ];
   const result=mode==='rpc' ? await runRpc(args,env,streamFile,commands)
     : await launchBounded(process.execPath,args,{cwd:root,env,streamFile,timeoutMs:25000});
@@ -167,6 +169,24 @@ try {
   engine=await acquireImageEngine(agent,root,cli);
   assert.equal(await acquireImageEngine(agent,root,cli),engine);
   assert.ok(!fs.existsSync(path.join(agent,'settings.json')),'native SDK acquisition must not register the upstream entrypoint');
+  const duplicate=await run('duplicate-count',{...limits,maxImages:2},{file:seed(true,3,()=>image(9,1,1,6))});
+  assert.deepEqual(duplicate.requests.map(r=>r.status),[200],'identical historical screenshots must fit the count cap');
+  assert.ok(duplicate.requests[0].images.length<=2);
+  assert.ok(duplicate.requests[0].imageLabels.includes('retained text 3'),'keep the newest occurrence');
+  const duplicateRetry=await run('duplicate-retry',limits,{file:seed(true,4,()=>image(9))});
+  assert.deepEqual(duplicateRetry.requests.map(r=>r.status),[413,200],'identical images must remain removable at the wire guard');
+  assert.ok(duplicateRetry.requests[1].images.length<duplicateRetry.requests[0].images.length);
+  assert.ok(duplicateRetry.requests[1].imageLabels.includes('retained text 4'));
+  results.duplicateImages=[duplicate.requests[0].images.length,...duplicateRetry.requests.map(r=>r.images.length)];
+  const extraImage=path.join(root,'extra-image.js');
+  const extraUrl='data:image/png;base64,'+image(10,1,1,6).data;
+  fs.writeFileSync(extraImage,`export default pi=>pi.on('before_provider_request',({payload})=>{
+    payload.messages.push({role:'user',content:[{type:'image_url',image_url:{url:${JSON.stringify(extraUrl)}}}]});
+    return payload;
+  });`);
+  const unmatched=await run('unmatched-image',{...limits,maxImages:2},{file:seed(true,2),extensions:[extraImage]});
+  assert.equal(unmatched.requests.length,0,'an ambiguous wire image sequence must not be trimmed');
+  assert.ok(unmatched.events.some(e=>e.type==='agent_settled' && e.aborted),unmatched.output);
   if(process.argv.includes('--large')){
     const largeImage=index=>image(index,1024,1200);
     const largeLimits={...limits,maxRequestBytes:40*1024**2,maxInlineImageBytes:32*1024**2};
@@ -208,8 +228,13 @@ try {
   assert.equal(recovery.entries.filter(e=>e.type==='context_edit').length,1,'reuse the native failed-attempt omission');
   assert.equal(recovery.entries.filter(e=>e.type==='custom'&&e.customType==='genosai-image-budget').length,1);
   results.recovery=recovery.requests.map(({status,bytes})=>({status,bytes}));
-  const resumed=await run('resumed',limits,{file:recovery.file});
-  assert.deepEqual(resumed.requests.map(r=>r.status),[200],resumed.output);
+  const previousEngine=engine;
+  removeImageEngines(agent,root);
+  engine=await acquireImageEngine(agent,root,cli);
+  assert.notEqual(engine,previousEngine,'same-pin reinstall must exercise a different checkout path');
+  const reorderedLimits=Object.fromEntries(Object.entries(limits).reverse());
+  const resumed=await run('resumed',reorderedLimits,{file:recovery.file});
+  assert.deepEqual(resumed.requests.map(r=>r.status),[200],'the learned limit must survive same-pin reinstall');
   assert.ok(resumed.requests[0].bytes<240000);
   results.resumedRequests=resumed.requests.length;
   const short=await run('short',limits,{keepRecentTokens:99999});

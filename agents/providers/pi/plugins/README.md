@@ -13,8 +13,10 @@ acquisition workflow.
 The supported `image-budget` plugin applies to the selected OpenAI-compatible image route.
 It checks the outgoing JSON body, image count and any configured per-image constraints.
 It keeps images introduced since the last completed answer and the configured number of
-recent images. It may resize copies or replace older images with placeholders. Stored
-messages and original image records remain available.
+recent image occurrences. Identical screenshots each have their own position. The wire guard
+protects every image in a request when it cannot align Pi's serialized images with those
+positions. It may resize copies or replace older images with placeholders. Stored messages
+and original image records remain available.
 
 For example, merge this plugin entry into an existing connection's `plugins` object:
 
@@ -40,7 +42,8 @@ image compression. `compressMaxBytes` measures base64 bytes.
 A confirmed recoverable body-size or image-count rejection can trigger one smaller
 retry in the same input. Pi retains normal compaction for token overflow and manual or
 threshold compaction. The plugin scopes learned limits to the session branch, profile,
-route and settings. Its budget applies to normal agent requests with supported payload
+route, budget options and upstream revision. Learned limits survive reinstalling the same pin.
+Its budget applies to normal agent requests with supported payload
 ordering. Independent summary and nested SDK calls and foreign hooks that modify the
 payload after the guard are outside this coverage.
 
