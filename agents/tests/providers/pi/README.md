@@ -28,6 +28,7 @@
 | [compatible.js](compatible.js) | native custom-model schemas, transport/replay, profile isolation, loaded guards/skills and shared-projection failure control |
 | [native.js](native.js) | installed SDK loading, exactly seven SOT skills, instruction sources and healthy permission refusal; no model call |
 | [transport.js](transport.js) | installed Pi against a recording local provider with synthetic credentials |
+| [image-budget.js](image-budget.js) | native same-turn image recovery, preserved token compaction, learned limits, history and zero-dispatch refusal |
 
 [The shared offline entrypoint](../../README.md) runs discovered Python and nested Node tests.
 Run on WSL and native Windows. Windows skips WSL installer fixtures explicitly, while gate/adapter tests
@@ -38,6 +39,18 @@ For the installed loader, use each platform's configured native Node:
 ```bash
 node agents/tests/providers/pi/native.js <installed-package-dist/index.js> <repo-root> <native-agent-directory>
 ```
+
+For installed image-budget acceptance, use the pinned runtime's native Node and CLI on both
+platforms. The first test measures gateway requests and persisted session history. The second
+exercises profile selection and plugin refusal through the managed launcher. Both acquire the
+pinned public Git dependency into disposable state. Model requests use loopback only.
+
+```bash
+node agents/tests/providers/pi/image-budget.js <installed-pi-cli>
+node agents/tests/providers/pi/endpoint.js <installed-pi-cli>
+```
+
+Pass `--large` to the first command to check the 40 MiB budget against a 48 MiB test gateway.
 
 ## Fresh installation acceptance
 

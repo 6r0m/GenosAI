@@ -67,6 +67,9 @@ and UI preferences are null (unmanaged) until added locally; the provider's type
 Known objects merge recursively. Codex accepts `approval_policy` and `sandbox_mode` in the local
 `codex` object, then uses its native versioned writer. Public defaults are `on-request`/`workspace-write`.
 
+Optional [Pi plugins](providers/pi/plugins/README.md) use this same local input for
+global and per-profile selection.
+
 Pi starts unconfigured. Copy the `active` and `profiles` fields from
 [the connection example](providers/pi/runtime/profiles.example.json) into local `pi`, then choose a
 provider/model and supply the referenced key. `pi.secret_root` defaults to the AI checkout's ignored

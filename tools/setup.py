@@ -58,8 +58,8 @@ try:
         print('Local input: '+config.local_path().name+'; sections: '+(', '.join(sorted(local)) or 'none')+' (values hidden).')
         subprocess.run([sys.executable,str(ROOT/'agents/providers/claude/settings.py'),'validate'],check=True)
         pi=config.pi_input()
-        if pi['configured']:
-            subprocess.run(['node',str(ROOT/'agents/providers/pi/runtime/configure.js'),'schema','--local'],input=json.dumps(pi),text=True,check=True)
+        if pi['configured'] or pi['profiles']['plugins']:
+            subprocess.run(['node',str(ROOT/'agents/providers/pi/runtime/configure.js'),'schema','--setup','--local'],input=json.dumps(pi),text=True,check=True)
         for file in source_files(ROOT):
             if file.suffix=='.py': ast.parse(file.read_text(encoding='utf-8'))
             if file.suffix=='.sh': subprocess.run(['bash','-n',str(file)],check=True)

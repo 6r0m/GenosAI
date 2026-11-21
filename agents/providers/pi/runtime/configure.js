@@ -4,13 +4,15 @@ import crypto from 'node:crypto';
 import {createRequire} from 'node:module';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {checkNativeArgs, pluginLaunch, pluginOptions, selectPlugins} from './plugins.js';
+import {acquireImageEngine,removeImageEngines} from './image-engine.js';
 
 // Pi owns provider compatibility and thinking-level semantics. This file owns only the
 // connection-profile schema, the pinned-catalog projection and native ownership checks.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const defaultProfileFile = path.join(here, 'profiles.json');
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-const PROFILE_KEYS = new Set(['provider', 'model', 'credential', 'thinking', 'endpoint', 'api', 'compatibleModel']);
+const PROFILE_KEYS = new Set(['provider', 'model', 'credential', 'thinking', 'endpoint', 'api', 'compatibleModel', 'plugins']);
 const MODEL_KEYS = new Set(['name', 'reasoning', 'input', 'contextWindow', 'maxTokens', 'thinkingLevelMap', 'compat']);
 const ID = /^[a-z][a-z0-9-]*$/;
 
@@ -34,10 +36,11 @@ const quote = s => "'" + s.replaceAll("'", "'\\''") + "'";
 
 // One named schema for connection profiles; every accepted key is deliberate and unknown keys fail closed.
 function resolveProfiles(data, setup = false) {
-  const unknown = Object.keys(data).filter(key => key !== 'active' && key !== 'profiles');
+  const unknown = Object.keys(data).filter(key => key !== 'active' && key !== 'profiles' && key !== 'plugins');
   if(unknown.length)throw Error('unknown profile configuration keys: ' + unknown.join(', '));
+  const plugins = pluginOptions(data.plugins);
   if(data.active===null && object(data.profiles) && Object.keys(data.profiles).length===0) {
-    if(setup)return null;
+    if(setup){selectPlugins(plugins,{});return null;}
     throw Error('Pi is unconfigured; add a private connection profile to config.local.jsonc before starting a session');
   }
   if(typeof data.active !== 'string' || !ID.test(data.active))throw Error('invalid active profile id');
@@ -69,10 +72,12 @@ function resolveProfiles(data, setup = false) {
         throw Error('invalid compatible thinking map for profile ' + id);
       if(entry.compatibleModel.compat !== undefined && !object(entry.compatibleModel.compat))throw Error('compatible model compat must be an object for profile ' + id);
     }
-    profiles[id] = {provider: entry.provider, model: entry.model, credential: entry.credential, thinking, endpoint, api, ...(custom ? {compatibleModel: entry.compatibleModel} : {})};
+    const selectedPlugins = pluginOptions(entry.plugins);
+    selectPlugins(plugins, selectedPlugins);
+    profiles[id] = {plugins: selectedPlugins,provider: entry.provider, model: entry.model, credential: entry.credential, thinking, endpoint, api, ...(custom ? {compatibleModel: entry.compatibleModel} : {})};
   }
   if(!Object.hasOwn(profiles,data.active))throw Error('active profile is not defined: ' + data.active);
-  return {active: data.active, profiles};
+  return {active: data.active, profiles, plugins};
 }
 
 // @earendil-works/pi-ai ships the provider catalog and the thinking-level capability. A
@@ -189,7 +194,7 @@ export async function configure(options) {
   if(options.profileScope)return configureProfile(options);
   return project(options);
 }
-async function project({op, dir, root, secretRoot = path.join(root, "secrets"), profiles, profileFile, requireKey = true, cli, expected, profileId, setup = false, resources, dryRun=false}) {
+async function project({op, dir, root, secretRoot = path.join(root, "secrets"), profiles, profileFile, requireKey = true, cli, expected, profileId, setup = false, resources, dryRun=false, engineBase}) {
   root = path.resolve(root);dir = path.resolve(dir);
   secretRoot=path.resolve(secretRoot);
   const credentialPath = reference => {
@@ -223,6 +228,13 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
     }
   }
   if(cli && op !== 'uninstall')catalogModel = await verifyCatalog(chosen, cli, expected);
+  const selectedProfile = chosen?.profiles[chosen.active];
+  const plugins = selectedProfile ? selectPlugins(chosen.plugins, selectedProfile.plugins) : {};
+  const launch = catalogModel
+    ? pluginLaunch(plugins, {...catalogModel, baseUrl:selectedProfile.endpoint || catalogModel.baseUrl,
+      provider:selectedProfile.provider}, chosen.active,undefined,
+      !setup && engineBase ? {base:engineBase,root} : undefined)
+    : undefined;
   const lock = path.join(dir, '.agents-sot.lock');
   if(op !== 'validate' && !dryRun) {
     fs.mkdirSync(dir, {recursive: true,mode:0o700});
@@ -280,7 +292,7 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
         modelProviders[profile.provider] = managed.models[profile.provider];
       }
     }
-    if(op === 'validate' || dryRun)return chosen ? {profile: chosen.active, provider: chosen.profiles[chosen.active].provider, model: chosen.profiles[chosen.active].model, thinking: chosen.profiles[chosen.active].thinking} : {};
+    if(op === 'validate' || dryRun)return chosen ? {profile: chosen.active, provider: chosen.profiles[chosen.active].provider, model: chosen.profiles[chosen.active].model, thinking: chosen.profiles[chosen.active].thinking, plugins, launch} : {};
     if(resources && op!=='uninstall') {
       // Record partial provisioning ownership so a failed local package install can be retried.
       atomic(statePath,{root,profile:chosen.active,managed:old,resources});
@@ -300,7 +312,7 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
       return {profile: null, provider: null, model: null, thinking: null};
     }
     atomic(statePath, {root, profile: chosen.active, managed,...(resources?{resources}:{})});
-    return {profile: chosen.active, provider: chosen.profiles[chosen.active].provider, model: chosen.profiles[chosen.active].model, thinking: chosen.profiles[chosen.active].thinking};
+    return {profile: chosen.active, provider: chosen.profiles[chosen.active].provider, model: chosen.profiles[chosen.active].model, thinking: chosen.profiles[chosen.active].thinking, plugins, launch};
   } finally {if(op !== 'validate' && !dryRun)fs.rmdirSync(lock);}
 }
 async function configureProfile(options) {
@@ -320,8 +332,10 @@ async function configureProfile(options) {
       ordinaryDirectory(dir);
       owned.push({...options,dir,resources,profileScope:false});
     }
+    removeImageEngines(base,options.root,true);
     for(const entry of [...owned,legacy])await project({...entry,dryRun:true});
     for(const entry of [...owned,legacy])await project(entry);
+    removeImageEngines(base,options.root);
     return {agentDir:base};
   }
   const chosen = op === 'uninstall' ? null : resolveProfiles(options.profiles !== undefined ? options.profiles : readProfiles(options.profileFile ?? defaultProfileFile), setup || op==='inspect');
@@ -351,22 +365,44 @@ async function configureProfile(options) {
     return selected;
   }
   if(setup)await project({...legacy,dryRun:true});
-  const projection={...options,dir,profiles:chosen,profileId:undefined,resources,profileScope:false};
+  const projection={...options,dir,profiles:chosen,profileId:undefined,resources,profileScope:false,engineBase:base};
   const validated=await project({...projection,op:'validate'});
   if(op==='validate')return {...validated,agentDir:dir};
   return {...await project(projection),agentDir:dir};
 }
 if(process.argv[1] === new URL(import.meta.url).pathname || process.argv[1]?.replaceAll('\\', '/').endsWith('/configure.js')) {
-  const args=process.argv.slice(2); const localMode=args.at(-1)==='--local'; if(localMode)args.pop();
+  const args=process.argv.slice(2);
+  const separator=args.indexOf('--');
+  const nativeArgs=separator<0 ? [] : args.splice(separator).slice(1);
+  const localMode=args.at(-1)==='--local'; if(localMode)args.pop();
   const setup=args.at(-1)==='--setup'; if(setup)args.pop();
   const [op, dir, root, cli, expected, profileId] = args;
   try {
     const input=localMode ? JSON.parse(fs.readFileSync(0,'utf8')) : {};
     if(localMode && (typeof input.root!=='string' || typeof input.secretRoot!=='string' || typeof input.configured!=='boolean'))throw Error('local configuration reader unavailable');
     if(op==='schema') {resolveProfiles(input.profiles, setup);process.exit(0);}
-    const result = await configure({op: op === 'resolve' ? 'validate' : op, dir, root, cli, expected, profileId, setup,profileScope:true,
+    if(op==='acquire-plugins') {
+      const config = resolveProfiles(input.profiles,true);
+      const requested = [input.profiles.plugins ?? {},...Object.values(config?.profiles ?? {}).map(x=>x.plugins)];
+      if(requested.some(plugins=>Object.hasOwn(plugins,'image-budget'))) {
+        if(!cli)throw Error('Pi runtime required to install image-budget; run make install PROVIDER=pi RUNTIME=1');
+        await verifyCatalog(null,cli,expected);
+        ordinaryDirectory(path.resolve(dir));
+        await acquireImageEngine(path.resolve(dir),input.root,cli);
+      }
+      process.exit(0);
+    }
+    if(op==='launch' || op==='inspect') {
+      await verifyCatalog(null,cli,expected);
+      await checkNativeArgs(cli,nativeArgs);
+    }
+    const result = await configure({op: op === 'resolve' ? 'validate' : op==='launch' ? 'install' : op, dir, root, cli, expected, profileId, setup,profileScope:true,
       ...(localMode ? {root:input.root,secretRoot:input.secretRoot,profiles:input.profiles} : {}), requireKey: op !== 'uninstall'});
     // Selection is returned from the same snapshot that was validated, and projected for install.
+    if(op==='launch') {
+      process.stdout.write([result.provider,result.model,result.agentDir,result.thinking||'-',
+        result.launch?.options||'-',...(result.launch?.entries??[])].join('\t')+'\n');
+    }
     if(op === 'resolve' || op === 'install' || op==='inspect')process.stdout.write([result.profile??'-', result.provider??'-', result.model??'-', result.agentDir,result.thinking].join('\t') + '\n');
   }
   catch(err) {console.error('pi-config: ' + err.message);process.exitCode = 1;}

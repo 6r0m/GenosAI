@@ -14,4 +14,6 @@ The material below retains its own licenses and notices, which must accompany re
 The Playwright manual and license were verified against the same pinned npm archive. Provider SDKs,
 model files and synced skill caches are not vendored in the source distribution. Pi's install lock
 pins acquired runtime dependencies; their package notices remain in the installed dependency tree.
+The optional [Pi image-budget dependency](agents/providers/pi/plugins/README.md) is acquired at its
+pinned Git commit during managed installation. The checkout includes its upstream MIT license.
 Model download recipes identify upstream repositories but convey no model redistribution rights.

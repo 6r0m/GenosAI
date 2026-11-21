@@ -154,6 +154,7 @@ pi() {
       runtime_args=("$native_cli" "$version")
       available=1
     fi
+    "$config_node" "$config_script" acquire-plugins "${config_args[@]}" "${runtime_args[@]}" --local <<<"$local_json" || return 1
     generic "$id" "$platform" "$home"
     if [[ "$available" == 1 ]]; then
       pi_native_package "$platform" "$task_node" "$native_cli" "$task_agent" install "$agent_root"

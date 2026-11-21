@@ -10,5 +10,5 @@ class PiAdapter(unittest.TestCase):
         self.assertIsNotNone(node, 'Node required; adapter verification must not skip')
         here = Path(__file__).resolve().parent
         result = subprocess.run([node, '--test', str(here/'adapter.test.js'),
-                                 str(here/'config.test.js'), str(here/'probe.test.js')], text=True, capture_output=True, timeout=45)
+                                 str(here/'config.test.js'), str(here/'probe.test.js')], text=True, capture_output=True, timeout=120)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

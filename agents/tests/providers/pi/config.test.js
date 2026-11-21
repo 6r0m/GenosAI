@@ -6,6 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {spawn,spawnSync} from 'node:child_process';
 import {resolveShell} from '../../../providers/pi/permissions/adapter.js';
 import {configure} from '../../../providers/pi/runtime/configure.js';
+import {pluginLaunch,pluginOptions,selectPlugins} from '../../../providers/pi/runtime/plugins.js';
 const scratch=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../../tmp');
 const one=(provider='deepseek',model='a',credential='secrets/a.key')=>({active:'first',profiles:{first:{provider,model,credential}}});
 function fixture(t) {
@@ -16,6 +17,35 @@ function fixture(t) {
  t.after(()=>fs.rmSync(root,{recursive:true,force:true}));return opts;
 }
 const read=(o,file)=>JSON.parse(fs.readFileSync(path.join(o.dir,file),'utf8'));
+test('Pi validates global and selected-profile plugins before projecting native state',async t=>{
+ const o=fixture(t),profiles=one();
+ profiles.plugins={'image-budget':{maxRequestBytes:100000,maxImages:20}};
+ profiles.profiles.first.plugins={'image-budget':{maxImages:8}};
+ profiles.profiles.second={provider:'deepseek',model:'b',credential:'secrets/b.key'};
+ assert.equal((await configure({...o,profiles,op:'validate'})).plugins['image-budget'].maxImages,8);
+ assert.equal((await configure({...o,profiles,op:'validate',profileId:'second'})).plugins['image-budget'].maxImages,20);
+ await configure({...o,op:'validate',setup:true,profiles:{active:null,profiles:{},plugins:profiles.plugins}});
+ profiles.profiles.second.plugins={'image-budget':{maxRequestBytes:0}};
+ await assert.rejects(configure({...o,profiles}),/maxRequestBytes/);
+ assert.deepEqual(fs.readdirSync(o.dir),[]);
+});
+test('managed plugin selection switches reviewed entrypoints without lifecycle changes',t=>{
+ const o=fixture(t);
+ const definition=name=>{
+  const entrypoint=path.join(o.root,name+'.js');
+  fs.writeFileSync(entrypoint,'export default function() {}\n');
+  return {entrypoint,validateOptions(options){assert.ok(Number.isInteger(options.limit));},
+   validateSelection(options){assert.ok(options.limit>0);},validateModel(model){assert.equal(model.id,'fixture');}};
+ };
+ const definitions={primary:definition('primary'),alternate:definition('alternate')};
+ const model={id:'fixture',provider:'synthetic',api:'openai-completions',baseUrl:'https://example.invalid/v1/'};
+ const select=id=>pluginLaunch(selectPlugins({},pluginOptions({[id]:{limit:16}},definitions),definitions),model,'profile',definitions);
+ for(const id of Object.keys(definitions)){
+  const launch=select(id);
+  assert.deepEqual(launch.entries,[definitions[id].entrypoint]);
+  assert.deepEqual(JSON.parse(launch.options),{route:{...model,baseUrl:'https://example.invalid/v1'},plugins:{[id]:{limit:16}},profile:'profile'});
+ }
+});
 function snapshotTree(dir) {
  const output={};
  for(const name of fs.readdirSync(dir).sort()){const file=path.join(dir,name),info=fs.lstatSync(file);output[name]=info.isSymbolicLink()?{link:fs.readlinkSync(file)}:info.isDirectory()?snapshotTree(file):fs.readFileSync(file,'utf8');}
@@ -326,7 +356,7 @@ test('concurrent native projections keep one consistent owner',async t=>{
 test('SOT-only changes select native managed launch on each platform',t=>{
  const o=fixture(t),repo=o.root;
  const runtime=path.join(repo,'ai/agents/providers/pi/runtime'),lifecycle=path.join(repo,'ai/agents/lifecycle');
- for(const [source,target] of [['providers/pi/runtime/launch.sh',path.join(runtime,'launch.sh')],['providers/pi/runtime/configure.js',path.join(runtime,'configure.js')],['providers/pi/runtime/profiles.json',path.join(runtime,'profiles.json')],['lifecycle/registry.sh',path.join(lifecycle,'registry.sh')],['lifecycle/providers.conf.sh',path.join(lifecycle,'providers.conf.sh')]]) {
+ for(const [source,target] of [['providers/pi/runtime/launch.sh',path.join(runtime,'launch.sh')],['providers/pi/runtime/configure.js',path.join(runtime,'configure.js')],['providers/pi/runtime/plugins.js',path.join(runtime,'plugins.js')],['providers/pi/runtime/image-engine.js',path.join(runtime,'image-engine.js')],['providers/pi/runtime/profiles.json',path.join(runtime,'profiles.json')],['lifecycle/registry.sh',path.join(lifecycle,'registry.sh')],['lifecycle/providers.conf.sh',path.join(lifecycle,'providers.conf.sh')]]) {
   fs.mkdirSync(path.dirname(target),{recursive:true});
   fs.copyFileSync(fileURLToPath(new URL('../../../'+source,import.meta.url)),target);
  }
@@ -342,6 +372,18 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  const prefix=path.join(home,win?'AppData/Roaming/pi-sot':'.local/share/pi-sot');
  const packageDir=path.join(prefix,'node_modules/@earendil-works/pi-coding-agent');
  const cli=path.join(packageDir,'dist/bundle/cli.js');fs.mkdirSync(path.dirname(cli),{recursive:true});
+ const argsFixture=path.join(packageDir,'dist/cli/args.js');
+ fs.mkdirSync(path.dirname(argsFixture),{recursive:true});
+ fs.writeFileSync(argsFixture,`export function parseArgs(args) {
+  const result={extensions:[]};
+  for (let i=0;i<args.length;i++) {
+   if (args[i]==='--') break;
+   if (['-ne','--no-extensions'].includes(args[i])) result.noExtensions=true;
+   if (['-e','--extension'].includes(args[i])) result.extensions.push(args[++i]);
+   if (args[i]==='--session') i++;
+  }
+  return result;
+ }`);
  const record=path.join(repo,'dispatch.json');
  fs.writeFileSync(cli,"const fs=require('fs'),path=require('path');if(process.argv[2]==='install'||process.argv[2]==='remove'){const f=path.join(process.env.PI_CODING_AGENT_DIR,'settings.json');fs.writeFileSync(f,JSON.stringify({packages:process.argv[2]==='install'?[process.argv[3]]:[]}));}else{fs.writeFileSync(process.env.PI_TEST_RECORD,JSON.stringify(process.argv.slice(2)));fs.writeFileSync(process.env.PI_TEST_RECORD+'.dir',process.env.PI_CODING_AGENT_DIR??'');}");
  fs.writeFileSync(path.join(repo,'ai/agents/AGENTS.md'),'Synthetic instructions');
@@ -458,6 +500,14 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  const managedDir=path.join(home,'.pi/agent');
  const managedBefore=snapshotTree(managedDir);
  const dispatchedBefore=fs.readFileSync(record,'utf8');
+ for (const args of [['--no-extensions'],['-ne'],['-e','npm:image-budget'],['--extension','github.com/fixture/extension']]) {
+  const refused=launch(...args);
+  assert.notEqual(refused.status,0,refused.stderr);
+  assert.match(refused.stderr,/permission extension|explicit local extension/);
+  assert.equal(fs.readFileSync(record,'utf8'),dispatchedBefore);
+  assert.deepEqual(snapshotTree(managedDir),managedBefore);
+ }
+
  for(const command of ['auth','config','install','remove','uninstall','update','mcp']) {
   result=launch(command,'--help');
   assert.notEqual(result.status,0,command+' must refuse before native dispatch');

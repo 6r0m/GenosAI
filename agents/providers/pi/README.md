@@ -7,6 +7,7 @@
 |---|---|
 | [Runtime](runtime/README.md) | managed launch and native configuration projection |
 | [Permissions](permissions/README.md) | adapter, Pi rule entry and shared guard reuse |
+| [Managed plugins](plugins/README.md) | optional extension selection and outbound image budgets |
 
 [The local package manifest](../../package.json) registers this provider's extension and the canonical
 skills. [Provider tests](../../tests/providers/README.md) own deterministic and installed-route proof.

@@ -492,6 +492,8 @@ if operation=='ci':
         partial=prefix/'node_modules/partial';partial.mkdir(parents=True,exist_ok=True);(partial/'x').write_text('partial');sys.exit(7)
     cli=package/'dist/bundle/cli.js';cli.parent.mkdir(parents=True,exist_ok=True)
     shutil.copyfile(os.environ['PI_TEST_CLI'],cli)
+    args=package/'dist/cli/args.js';args.parent.mkdir(exist_ok=True)
+    args.write_text("export function parseArgs(){return {}}")
     locked=json.loads((prefix/'package.json').read_text())['dependencies']['@earendil-works/pi-coding-agent']
     (package/'package.json').write_text(json.dumps({'version':locked}))
     catalog=prefix/'node_modules/@earendil-works/pi-ai/dist/providers/data';catalog.mkdir(parents=True,exist_ok=True)

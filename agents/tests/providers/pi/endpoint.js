@@ -5,16 +5,17 @@ import assert from 'node:assert/strict';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {launchBounded} from './live.js';
 import {thinkingFields} from './probe.js';
+import {acquireImageEngine} from '../../../providers/pi/runtime/image-engine.js';
 import {resolveShell} from '../../../providers/pi/permissions/adapter.js';
 const agents=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const root=fs.mkdtempSync(path.resolve(agents,'../tmp/pi-endpoint-'));
 const copy=path.join(root,'ai/agents'),runtime=path.join(copy,'providers/pi/runtime'),lifecycle=path.join(copy,'lifecycle');
-for(const relative of ['providers/pi/runtime/launch.sh','providers/pi/runtime/configure.js','providers/pi/runtime/profiles.json','lifecycle/registry.sh','lifecycle/providers.conf.sh','config.py','permissions/run-guard.sh','permissions/guards/_paths.py']) {
+for(const relative of ['providers/pi/runtime/launch.sh','providers/pi/runtime/configure.js','providers/pi/runtime/plugins.js','providers/pi/runtime/image-engine.js','providers/pi/runtime/profiles.json','lifecycle/registry.sh','lifecycle/providers.conf.sh','config.py','permissions/run-guard.sh','permissions/guards/_paths.py']) {
  const target=path.join(copy,relative);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(agents,relative),target);
 }
 fs.writeFileSync(path.join(root,'ai/config.local.json'),JSON.stringify({pi:{secret_root:path.join(root,'secrets'),ownership_root:root}}));
 fs.copyFileSync(path.join(agents,'package.json'),path.join(copy,'package.json'));
-for(const relative of ['AGENTS.md','skills','providers/pi/permissions'])fs.symlinkSync(path.join(agents,relative),path.join(copy,relative),process.platform==='win32'&&relative!=='AGENTS.md'?'junction':relative==='AGENTS.md'?'file':'dir');
+for(const relative of ['AGENTS.md','skills','providers/pi/permissions','providers/pi/plugins'])fs.symlinkSync(path.join(agents,relative),path.join(copy,relative),process.platform==='win32'&&relative!=='AGENTS.md'?'junction':relative==='AGENTS.md'?'file':'dir');
 const home=path.join(root,'home'),win=process.platform==='win32';fs.mkdirSync(home);
 const packageDir=path.resolve(path.dirname(process.argv[2]),'../..');
 const prefixRoot=path.join(home,win?'AppData/Roaming/pi-sot':'.local/share/pi-sot');
@@ -80,12 +81,19 @@ for(const [id,entry] of Object.entries(production.profiles)) {
 const writeProfiles=active=>fs.writeFileSync(profileFile,JSON.stringify({active,profiles}));
 let launched=0;
 const launch=(...selector)=>launchWithEnv({},...selector);
-const launchWithEnv=async(extraEnv,...selector)=>{
+const launchWithEnv=async({expectBudgetRefusal=false,...extraEnv},...selector)=>{
  const id=selector[0]==='--profile'?selector[1]:JSON.parse(fs.readFileSync(profileFile)).active;
  const selectedAgent=path.join(baseAgent,'profiles',id);
  const args=['-c',win?'export HOME="$(cygpath -u "$PI_TEST_HOME")"; exec bash "$PI_TEST_LAUNCH" "$@"':'exec bash "$PI_TEST_LAUNCH" "$@"','endpoint-test',...selector,'-e',fixture,'-p','respond ok'];
  const streamFile=path.join(root,'launch-'+(++launched)+'.log');
  const result=await launchBounded(resolveShell(),args,{cwd:root,env:{...process.env,HOME:home,PI_OFFLINE:'1',PI_TELEMETRY:'0',PI_TEST_HOME:home,PI_TEST_LAUNCH:path.join(runtime,'launch.sh').replaceAll('\\','/'),...extraEnv},timeoutMs:30000,streamFile});
+ if(expectBudgetRefusal){
+  const output=fs.readFileSync(streamFile,'utf8');
+  assert.equal(result.timedOut,false,output);
+  assert.equal(result.code,1,output);
+  assert.match(output,/image-budget: request refused/);
+  return;
+ }
  if(result.code!==0||result.timedOut)throw Error('native endpoint launch refused: '+fs.readFileSync(streamFile,'utf8'));
  agent=selectedAgent;
 };
@@ -162,5 +170,32 @@ try {
  finally {if(savedAgent===undefined)delete process.env.PI_CODING_AGENT_DIR;else process.env.PI_CODING_AGENT_DIR=savedAgent;}
  await launch('--profile','second','--session',history[0].path);
  assert.equal(requests.at(-1).id,'second');assert.equal(requests.at(-1).authMatches,true);
+ const beforeBudget=requests.length;
+ profiles.first.plugins={'image-budget':{maxRequestBytes:64,maxImages:8}};
+ writeProfiles('first');
+ const firstAgent=path.join(baseAgent,'profiles/first');
+ const managedFiles=['auth.json','models.json','agents-sot-state.json','settings.json'];
+ const projected=()=>managedFiles.map(name=>{
+  const file=path.join(firstAgent,name);
+  return fs.existsSync(file)?fs.readFileSync(file,'utf8'):null;
+ });
+ const existingProjection=projected();
+ for (const args of [['--no-extensions'],['-ne'],['-e','npm:fixture-plugin'],['--extension','git:github.com/fixture/plugin']]) {
+  await assert.rejects(launch('--profile','first',...args),/requires (?:its permission extension|an existing explicit local extension path)/);
+  assert.deepEqual(projected(),existingProjection,'forbidden flags must refuse before projection');
+  assert.equal(requests.length,beforeBudget,'forbidden flags must refuse before dispatch');
+ }
+ await assert.rejects(launch('--profile','first'),/run make install PROVIDER=pi/);
+ assert.equal(requests.length,beforeBudget,'a missing checkout must refuse locally');
+ await acquireImageEngine(baseAgent,root,process.argv[2]);
+ await launchWithEnv({expectBudgetRefusal:true},'--profile','first');
+ assert.equal(requests.length,beforeBudget,'the selected profile must load the budget and abort before dispatch');
+ await launch('--profile','second');
+ assert.equal(requests.length,beforeBudget+1,'an unrelated profile must retain normal dispatch');
+ delete profiles.first.plugins;
+ writeProfiles('first');
+ await launch('--profile','first');
+ assert.equal(requests.length,beforeBudget+2,'disabling plugin in config must take effect on the next launch');
+
  console.log(JSON.stringify({platform:process.platform,requests,invalidProfileRefused:true,concurrentProcesses:2,resumeUsesSelectedProfile:true,keysPreserved:fs.existsSync(path.join(root,'secrets/primary.key'))&&fs.existsSync(path.join(root,'secrets/alternate.key'))}));
 }finally {first.closeAllConnections();second.closeAllConnections();await Promise.all([new Promise(r=>first.close(r)),new Promise(r=>second.close(r))]);fs.rmSync(root,{recursive:true,force:true});}

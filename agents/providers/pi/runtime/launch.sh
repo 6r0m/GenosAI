@@ -21,6 +21,7 @@ export PI_TELEMETRY="$PI_TELEMETRY_VALUE"
 export PI_CODING_AGENT_DIR="$task_dir"
 platform=wsl
 [[ "${OSTYPE-}" != msys* && "${OSTYPE-}" != cygwin* ]] || platform=windows
+unset PI_SOT_PLUGINS
 local_json="$(bash "$AI_ROOT/permissions/run-guard.sh" ../../config.py pi --platform "$platform")"
 selected_profile=''
 # Only the leading managed selector is consumed; native option values and prompts stay opaque.
@@ -47,7 +48,7 @@ fi
 # Native subcommands are recognized only at argv[0], before ordinary prompt parsing.
 case "${1-}" in
   list)
-    resolved="$("$task_node" "$SCRIPT_DIR/configure.js" inspect "${config_args[@]}" "${selection_args[@]}" --local <<<"$local_json")"
+    resolved="$("$task_node" "$SCRIPT_DIR/configure.js" inspect "${config_args[@]}" "${selection_args[@]}" --local -- "$@" <<<"$local_json")"
     IFS=$'\t' read -r active provider model selected_dir thinking <<<"$resolved"
     [[ -n "$selected_dir" ]] || { echo 'error: Pi inspection directory missing' >&2; exit 1; }
     export PI_CODING_AGENT_DIR="$selected_dir"
@@ -56,11 +57,13 @@ case "${1-}" in
     echo "error: '$1' mutates native state outside the managed SOT route; edit the ignored local pi object for connections, or use scripts/install.sh and scripts/uninstall.sh for lifecycle operations. Raw pi is the unmanaged route." >&2
     exit 1 ;;
 esac
-# One install validates and projects one profile snapshot, then returns its launch selection.
-resolved="$("$task_node" "$SCRIPT_DIR/configure.js" install "${config_args[@]}" "${selection_args[@]}" --local <<<"$local_json")" || exit 1
-IFS=$'\t' read -r active provider model selected_dir thinking <<<"$resolved"
-[[ -n "$active" && -n "$provider" && -n "$model" && -n "$selected_dir" ]] || { echo 'error: Pi profile resolution produced no connection' >&2; exit 1; }
-export PI_CODING_AGENT_DIR="$selected_dir"
-launch_args=(--provider "$provider" --model "$model")
-[[ -z "$thinking" ]] || launch_args+=(--thinking "$thinking")
+# One validation and projection supplies both the route and its optional extensions.
+resolved="$("$task_node" "$SCRIPT_DIR/configure.js" launch "${config_args[@]}" "${selection_args[@]}" --local -- "$@" <<<"$local_json")" || exit 1
+IFS=$'\t' read -r -a selection <<<"$resolved"
+[[ ${#selection[@]} -ge 5 ]] || { echo 'error: Pi profile resolution produced no connection' >&2; exit 1; }
+export PI_CODING_AGENT_DIR="${selection[2]}"
+launch_args=(--provider "${selection[0]}" --model "${selection[1]}")
+[[ "${selection[3]}" == - ]] || launch_args+=(--thinking "${selection[3]}")
+[[ "${selection[4]}" == - ]] || export PI_SOT_PLUGINS="${selection[4]}"
+for extension in "${selection[@]:5}"; do launch_args+=(--extension "$extension"); done
 exec "$task_node" "$task_cli" "${launch_args[@]}" "$@"
