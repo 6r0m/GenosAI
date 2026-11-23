@@ -169,6 +169,17 @@ try {
   engine=await acquireImageEngine(agent,root,cli);
   assert.equal(await acquireImageEngine(agent,root,cli),engine);
   assert.ok(!fs.existsSync(path.join(agent,'settings.json')),'native SDK acquisition must not register the upstream entrypoint');
+  const resizeLimits={...limits,compress:true,compressMaxDimension:64};
+  const resized=await run('resize-only',resizeLimits,{file:seed(true,3)});
+  const resizedAgain=await run('resize-only-resumed',resizeLimits,{file:resized.file});
+  assert.deepEqual(resized.requests.map(r=>r.status),[200]);
+  assert.deepEqual(resizedAgain.requests.map(r=>r.status),[200]);
+  const originals=[1,2,3].map(index=>'data:image/png;base64,'+image(index).data);
+  assert.deepEqual(resized.requests[0].imageLabels,['retained text 1','retained text 2','retained text 3']);
+  assert.deepEqual(resized.requests[0].images.map((url,index)=>url===originals[index]),[false,false,true]);
+  assert.deepEqual(resizedAgain.requests[0].images,resized.requests[0].images);
+  assert.doesNotMatch(resized.output+resizedAgain.output,/image-budget: /,
+    'routine resizing must be quiet on both requests');
   const duplicate=await run('duplicate-count',{...limits,maxImages:2},{file:seed(true,3,()=>image(9,1,1,6))});
   assert.deepEqual(duplicate.requests.map(r=>r.status),[200],'identical historical screenshots must fit the count cap');
   assert.ok(duplicate.requests[0].images.length<=2);
@@ -255,11 +266,13 @@ try {
   const refusal=await run('refusal',{...limits,maxRequestBytes:32},{file:seed(false)});
   assert.equal(refusal.requests.length,0,refusal.output);
   assert.ok(refusal.events.some(e=>e.type==='agent_settled' && e.aborted),refusal.output);
+  assert.match(refusal.output,/image-budget: request refused/);
   results.refusedRequests=refusal.requests.length;
   const count=await run('count',{...limits,maxImages:2});
   assert.equal(count.requests.length,1,count.output);
   assert.ok(count.requests[0].images.length<=2);
   assert.ok(count.requests[0].images.includes('data:image/png;base64,'+image(4).data));
+  assert.match(count.output,/image-budget: .* [1-9]\d* omitted,/);
   results.imageCount=count.requests[0].images.length;
   const tiny=index=>image(index,1,1,6);
   const threshold=await run('threshold',limits,{file:seed(true,4,tiny)});

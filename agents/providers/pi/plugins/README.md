@@ -16,7 +16,8 @@ It keeps images introduced since the last completed answer and the configured nu
 recent image occurrences. Identical screenshots each have their own position. The wire guard
 protects every image in a request when it cannot align Pi's serialized images with those
 positions. It may resize copies or replace older images with placeholders. Stored messages
-and original image records remain available.
+and original image records remain available. Routine resizing is silent. The adapter reports
+image omissions, recovery attempts, and refused requests.
 
 For example, merge this plugin entry into an existing connection's `plugins` object:
 

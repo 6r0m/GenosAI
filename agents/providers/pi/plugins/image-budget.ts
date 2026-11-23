@@ -181,7 +181,7 @@ export default async function imageBudget(pi) {
           return block;
         })} : message);
       projectedImages = outgoing;
-      if (plan.stats.omittedImages || plan.stats.resizedImages) {
+      if (plan.stats.omittedImages) {
         report(ctx,`${outgoing.length} images kept, ${plan.stats.omittedImages} omitted, ${plan.stats.resizedImages} resized`,'warning');
       }
       return plan.changed ? {messages:output} : undefined;
