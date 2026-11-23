@@ -65,6 +65,43 @@ class CodexSettings(unittest.TestCase):
             self.settings.configure(server, "/fixture/config.toml", self.policy, True)
         self.assertTrue(all(call.args[0] == "config/read" for call in server.call.call_args_list))
 
+    def test_public_defaults_cannot_publish_a_model_and_private_fields_are_optional(self):
+        tracked = {'approval_policy': 'never', 'sandbox_mode': 'read-only'}
+        self.assertEqual(self.settings.compose(tracked, {}), tracked)
+        self.assertEqual(self.settings.compose(tracked, {'model': 'fixture-model'}),
+                         {**tracked, 'model': 'fixture-model'})
+        with self.assertRaises(RuntimeError):
+            self.settings.compose({**tracked, 'model': 'published-model'}, {})
+        for invalid in ({'unknown': 'x'}, {'model': ''}, {'model': 7}):
+            with self.subTest(invalid=invalid), self.assertRaises(RuntimeError):
+                self.settings.compose(tracked, invalid)
+
+    def test_selected_model_updates_only_that_field_and_keeps_native_effort(self):
+        policy = {**self.policy, 'model': 'fixture-model'}
+        self.user['model'] = 'native-model'
+        projected = {**self.user, **policy}
+        server = mock.Mock()
+        server.call.side_effect = [self.snapshot(), {'status': 'ok'},
+                                  {'layers': [{**self.layer, 'config': projected}], 'config': projected}]
+        self.assertTrue(self.settings.configure(server, '/fixture/config.toml', policy, True))
+        method, params = server.call.call_args_list[1].args
+        self.assertEqual(method, 'config/batchWrite')
+        self.assertEqual({edit['keyPath']: edit['value'] for edit in params['edits']},
+                         {**self.policy, 'model': 'fixture-model'})
+        self.assertNotIn('model_reasoning_effort', {edit['keyPath'] for edit in params['edits']})
+        self.assertEqual(projected['model_reasoning_effort'], 'high')
+
+    def test_effective_model_override_cannot_report_success(self):
+        policy = {**self.policy, 'model': 'fixture-model'}
+        self.user.update(policy)
+        snapshot = self.snapshot()
+        snapshot['config'] = {**self.user, 'model': 'managed-model'}
+        server = mock.Mock()
+        server.call.return_value = snapshot
+        with self.assertRaises(RuntimeError):
+            self.settings.configure(server, '/fixture/config.toml', policy, True)
+        self.assertEqual(server.call.call_count, 1)
+
     def test_missing_user_layer_and_overridden_result_are_not_success(self):
         server = mock.Mock()
         server.call.return_value = {"layers": [], "config": {}}
@@ -177,6 +214,36 @@ exit "$FAILED"
 
 @unittest.skipUnless(shutil.which("codex"), "native Codex required for local config integration")
 class NativeCodexSettings(unittest.TestCase):
+    def test_native_writer_applies_selected_model_only_and_stays_idempotent(self):
+        source = Path(ST.AGENTS) / "providers/codex/settings.py"
+        spec = importlib.util.spec_from_file_location("codex_settings_native", source)
+        settings = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(settings)
+        with tempfile.TemporaryDirectory(dir=Path(ST.REPO) / "tmp") as temporary:
+            home = Path(temporary)
+            config = home / "config.toml"
+            config.write_text('# keep\nmodel = "native-model"\nmodel_reasoning_effort = "low"\n'
+                              '[windows]\nsandbox = "elevated"\n')
+            policy = {"approval_policy": "never", "sandbox_mode": "read-only", "model": "fixture-model"}
+
+            def apply():
+                server = settings.Server(shutil.which("codex"), str(home), str(home))
+                server.call("initialize", {"clientInfo": {"name": "agents-sot-test", "version": "1.0"}})
+                server.notify("initialized")
+                try:
+                    return settings.configure(server, str(config), policy, True)
+                finally:
+                    server.close()
+
+            self.assertTrue(apply())
+            projected = config.read_bytes()
+            self.assertIn(b'# keep', projected)
+            self.assertIn(b'model = "fixture-model"', projected)
+            self.assertIn(b'model_reasoning_effort = "low"', projected)
+            self.assertIn(b'sandbox = "elevated"', projected)
+            self.assertFalse(apply())
+            self.assertEqual(config.read_bytes(), projected)
+
     def test_native_writer_is_idempotent_preserves_config_and_refuses_invalid_toml(self):
         with tempfile.TemporaryDirectory(dir=Path(ST.REPO) / "tmp") as temporary:
             home = Path(temporary)

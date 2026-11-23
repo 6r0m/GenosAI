@@ -3,7 +3,7 @@
 | provider | owns |
 |---|---|
 | [Claude Code](claude/README.md) | user settings on both sides: the tracked file, its plan and apply, and the drift warning |
-| [Codex](codex/README.md) | permission defaults on both sides, projected through the native config writer |
+| [Codex](codex/README.md) | permission defaults and optional private model preferences on both sides, projected through the native config writer |
 | [Pi](pi/README.md) | native package lifecycle, managed runtime and permission integration |
 
 Shared provider registration and profile selection belong to

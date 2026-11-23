@@ -19,6 +19,20 @@ class PrivateConfiguration(unittest.TestCase):
         example = config.parse((AI / "config.local.example.jsonc").read_bytes(), commented=True)
         self.assertIsNone(example["browser"]["cdp_url"])
 
+    def test_codex_model_preferences_are_explicit_optional_strings(self):
+        base = {'approval_policy': 'on-request', 'sandbox_mode': 'workspace-write'}
+        for extra in ({}, {'model': 'fixture-model'}, {'model_reasoning_effort': 'high'},
+                      {'model': 'fixture-model', 'model_reasoning_effort': 'high'}):
+            with self.subTest(extra=extra):
+                raw = json.dumps({'codex': {**base, **extra}}).encode()
+                self.assertEqual(config.parse(raw), {'codex': {**base, **extra}})
+        for extra in ({'model': ''}, {'model': ' fixture-model'}, {'model': 'fixture-model\n'},
+                      {'model': 7}, {'model': None}, {'model_reasoning_effort': ''},
+                      {'model_reasoning_effort': 'HIGH '}, {'unmanaged': 'x'},
+                      {'sandbox_mode': 'yolo'}):
+            with self.subTest(extra=extra), self.assertRaises(config.ConfigError):
+                config.parse(json.dumps({'codex': {**base, **extra}}).encode())
+
     def test_jsonc_preserves_strings_and_rejects_ambiguous_or_malformed_input(self):
         example=b'{/* setup */"browser":{"cdp_url":"http://127.0.0.1:9222/a//b"},"pi":{"active":null,"profiles":{}}}// end'
         self.assertEqual(config.parse(example,True)['browser']['cdp_url'],'http://127.0.0.1:9222/a//b')

@@ -74,7 +74,8 @@ class InstallerWiring(unittest.TestCase):
             json.dump(profiles,stream)
         with open(os.path.join(os.path.dirname(self.copy),'config.local.json'),'w') as stream:
             json.dump({'pi':{'secret_root':secret_dir,'ownership_root':os.path.dirname(secret_dir)},
-                       'codex':{'approval_policy':'never','sandbox_mode':'danger-full-access'}},stream)
+                       'codex':{'approval_policy':'never','sandbox_mode':'danger-full-access',
+                                'model':'fixture-model'}},stream)
         self.skills = os.path.join(self.copy, "skills")
         shutil.copytree(ST.SKILLS, self.skills, ignore=shutil.ignore_patterns("synced", "__pycache__"))
         leaked = os.path.join(self.skills, "synced", "bucket", "leaked-skill")
@@ -209,6 +210,7 @@ class InstallerWiring(unittest.TestCase):
         self.assertIn(original.encode(), projected)
         self.assertIn(b'approval_policy = "never"', projected)
         self.assertIn(b'sandbox_mode = "danger-full-access"', projected)
+        self.assertIn(b'model = "fixture-model"', projected)
         second = self.run_script('install.sh', '--provider', 'codex', extra_env=env)
         self.assertIn('Codex settings already current:', second.stdout)
         with open(config, 'rb') as stream:

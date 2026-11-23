@@ -131,11 +131,16 @@ def validate(value):
     if not isinstance(claude, dict) or "hooks" in claude:
         raise ConfigError("local Claude settings cannot replace managed hooks")
     codex=value.get('codex', {})
-    _fields(codex, ('approval_policy','sandbox_mode'), 'Codex')
+    _fields(codex, ('approval_policy','sandbox_mode','model','model_reasoning_effort'), 'Codex')
     if 'approval_policy' in codex and codex['approval_policy'] not in ('untrusted','on-failure','on-request','never'):
         raise ConfigError('invalid Codex approval policy')
     if 'sandbox_mode' in codex and codex['sandbox_mode'] not in ('read-only','workspace-write','danger-full-access'):
         raise ConfigError('invalid Codex sandbox mode')
+    for name in ('model','model_reasoning_effort'):
+        text=codex.get(name)
+        if name in codex and (not isinstance(text,str) or not text or text != text.strip()
+                              or any(ord(character) < 32 for character in text)):
+            raise ConfigError('invalid Codex ' + name.replace('_',' '))
     pi=value.get('pi', {})
     _fields(pi, ('active','profiles','secret_root','ownership_root','plugins'), 'Pi')
     if pi.get('active') is not None and not isinstance(pi['active'],str):

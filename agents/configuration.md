@@ -65,7 +65,11 @@ the same composition and generated paths. The writer never rewrites the local fi
 Public Claude permissions use ordinary approval and no broad Bash allowlist. Optional model, plugin
 and UI preferences are null (unmanaged) until added locally; the provider's type schema validates them.
 Known objects merge recursively. Codex accepts `approval_policy` and `sandbox_mode` in the local
-`codex` object, then uses its native versioned writer. Public defaults are `on-request`/`workspace-write`.
+`codex` object plus optional `model` and `model_reasoning_effort` preferences, then uses its native
+versioned writer. Public defaults are `on-request`/`workspace-write`. Optional fields are managed only
+when present locally; an omitted optional field keeps its native value. Both optional values must be
+non-empty strings and are not checked against a model or effort catalog, so a successful write does
+not establish that the installed Codex or the account accepts the value.
 
 Optional [Pi plugins](providers/pi/plugins/README.md) use this same local input for
 global and per-profile selection.

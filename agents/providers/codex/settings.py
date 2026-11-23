@@ -1,4 +1,4 @@
-"""Apply tracked defaults through Codex's version-checked native TOML writer."""
+"""Apply public defaults and optional private preferences through Codex's version-checked writer."""
 import argparse
 import json
 import ntpath
@@ -13,6 +13,10 @@ import time
 sys.dont_write_bytecode = True
 sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 import config as local_config
+
+
+PUBLIC_KEYS = ("approval_policy", "sandbox_mode")
+OPTIONAL_KEYS = ("model", "model_reasoning_effort")
 
 
 class Server:
@@ -112,6 +116,18 @@ class Server:
             raise RuntimeError("Codex config server shutdown returned a nonzero exit; inspect native configuration/startup")
 
 
+def compose(tracked, local):
+    """Public permission defaults plus optional private model preferences."""
+    if set(tracked) != set(PUBLIC_KEYS):
+        raise RuntimeError("Invalid tracked Codex defaults: only the permission defaults are public")
+    policy = dict(tracked)
+    policy.update(local)
+    if set(policy) - set(PUBLIC_KEYS) - set(OPTIONAL_KEYS) \
+            or not all(isinstance(value, str) and value for value in policy.values()):
+        raise RuntimeError("Invalid Codex settings policy")
+    return policy
+
+
 def user_layer(snapshot, target):
     normalize = ntpath.normcase if "\\" in target else os.path.normcase
     layers = [layer for layer in snapshot.get("layers") or []
@@ -134,10 +150,10 @@ def configure(server, target, policy, apply):
     changes = {key: value for key, value in policy.items() if existing.get(key) != value}
     if changes:
         if not apply:
-            raise RuntimeError("Codex permission defaults differ from the tracked policy")
+            raise RuntimeError("Codex managed settings differ from the composed policy")
         for key, value in changes.items():
             previous = existing.get(key)
-            label = previous if isinstance(previous, str) else "unset" if previous is None else "custom policy"
+            label = previous if isinstance(previous, str) else "unset" if previous is None else "custom value"
             print("Codex setting change: {}: {} -> {}".format(key, label, value), flush=True)
         result = server.call("config/batchWrite", {
             "filePath": layer["name"]["file"], "expectedVersion": layer["version"],
@@ -155,7 +171,7 @@ def configure(server, target, policy, apply):
         projected = existing
     if any(projected.get(key) != value or snapshot.get("config", {}).get(key) != value
            for key, value in policy.items()):
-        raise RuntimeError("Codex effective defaults differ from the tracked policy; inspect higher-priority configuration")
+        raise RuntimeError("Codex effective settings differ from the composed policy; inspect higher-priority configuration")
     return bool(changes)
 
 
@@ -166,11 +182,9 @@ def main():
     parser.add_argument("--codex", required=True)
     parser.add_argument("--native-home")
     args = parser.parse_args()
-    policy = json.loads(Path(__file__).with_name("user-settings.json").read_text())
+    tracked = json.loads(Path(__file__).with_name("user-settings.json").read_text())
     _, local = local_config.load()
-    policy.update(local.get('codex',{}))
-    if set(policy) != {"approval_policy", "sandbox_mode"} or not all(isinstance(value, str) for value in policy.values()):
-        raise RuntimeError("Invalid tracked Codex permission policy")
+    policy = compose(tracked, local.get('codex',{}))
     home = args.home.resolve()
     native_home = args.native_home or str(home)
     target = (ntpath if "\\" in native_home else os.path).join(native_home, "config.toml")

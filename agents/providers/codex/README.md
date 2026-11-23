@@ -1,13 +1,17 @@
 # Codex provider
 
 [user-settings.json](user-settings.json) owns the machine-wide Codex permission defaults.
-[settings.py](settings.py) applies or checks those fields through the installed Codex app-server's
-native config API. [lifecycle.sh](lifecycle.sh) connects that owner to the shared installer and the
+[settings.py](settings.py) applies or checks those composed fields through the installed Codex
+app-server's native config API. [lifecycle.sh](lifecycle.sh) connects that owner to the shared installer and the
 existing instruction and skill wiring.
 
 Public defaults require approval on request and limit writes to the workspace. Private operator
-choices belong in `config.local.jsonc` under `codex`; the same native writer applies the composed
-policy and prints changes to owned fields before writing.
+choices belong in `config.local.jsonc` under `codex`: the optional `model` and
+`model_reasoning_effort` preferences, plus any permission override. The same native writer applies
+the composed policy and prints changes to owned fields before writing. Public defaults never select a
+model, and only fields present in the composed policy are managed; an omitted optional field keeps its
+native value. Removing one stops managing it and leaves the last written value until it is changed
+natively.
 Shared instructions guide the agent's behavior. The accident guards documented by
 [the permission owner](../../permissions/README.md) are integrated separately by Claude Code and Pi;
 this provider does not register deletion hooks for Codex. Those guards are not an OS security boundary.
@@ -25,20 +29,26 @@ interpreter, with the selected Windows `CODEX_HOME` propagated across WSL intero
 Missing runtimes and refused settings are reported as partial failures; the independent instruction
 and skill wiring is still attempted. It does not acquire or upgrade Codex.
 
-The native writer changes only the tracked top-level fields in each user's `config.toml`, preserving
-unrelated models, providers, projects, Windows sandbox selection and comments. It uses the native
-config version to reject a stale write and reads the result back. Matching defaults produce
-`already current` without another config write. Config parse failures and managed restrictions are
-reported; native error payloads and configuration contents are not printed. Existing
+The native writer changes only the composed top-level fields in each user's `config.toml`, preserving
+unrelated models, providers, projects, Windows sandbox selection and comments. Editing the checkout
+changes nothing by itself; the selected install projects the composed values into each native file.
+It uses the native config version to reject a stale write and reads the result back. Matching defaults
+produce `already current` without another config write. Config parse failures and managed restrictions
+are reported; native error payloads and configuration contents are not printed. Existing
 `default_permissions` or `sandbox_workspace_write` configuration refuses before writing because
-those settings require an explicit reconciliation with the tracked policy. Uninstall removes the
+those settings require an explicit reconciliation with the composed policy. Uninstall removes the
 owned instruction and skill links and leaves user configuration in place.
+
+GenosAI validates the optional model preferences only as non-empty strings and does not pin model IDs
+or effort levels. A successful configuration write establishes only that the field was written: it
+does not prove that the installed Codex or the signed-in account supports the selected model or
+effort level.
 
 These are defaults for newly initialized sessions. Project configuration, selected profiles, CLI
 flags, an IDE's thread settings and managed requirements can override or constrain them. An active
 thread is not reconfigured by installation. Start a fresh session after installation and inspect its
-effective permissions with `/status`; changing a permissions selector in another interface does not
-establish this thread's effective policy. Codex's [configuration precedence](https://learn.chatgpt.com/docs/config-file/config-basic)
+effective model and permissions with `/status`; changing a model or permissions selector in another
+interface does not establish this thread's effective policy. Codex's [configuration precedence](https://learn.chatgpt.com/docs/config-file/config-basic)
 and [sandbox documentation](https://learn.chatgpt.com/docs/sandboxing) define those native boundaries.
 
 For a local configuration check without inference:
@@ -50,8 +60,8 @@ python3 agents/providers/codex/settings.py check "$HOME/.codex" --codex "$(comma
 [Settings tests](../../tests/test_codex_settings.py) exercise the native writer in a disposable home,
 with synthetic configuration and no model requests. They cover repeated installation, preservation,
 refusal of malformed TOML, and a native Windows command shim with spaces using an empty or conflicting
-selected home. Deterministic tests cover version guarding, interpreter selection, environment
-propagation and override handling.
+selected home. Deterministic tests cover version guarding, optional model selection, interpreter
+selection, environment propagation and override handling.
 
 For WSL-to-Windows installed-route acceptance, run from `agents/tests/`:
 
