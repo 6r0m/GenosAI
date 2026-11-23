@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "maxRetries": 5,
+  "baseDelayMs": 60000,
+  "maxAgentDelayMs": 900000
+}

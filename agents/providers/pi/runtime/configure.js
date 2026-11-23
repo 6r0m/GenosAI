@@ -8,7 +8,7 @@ import {checkNativeArgs, pluginLaunch, pluginOptions, selectPlugins} from './plu
 import {acquireImageEngine,removeImageEngines} from './image-engine.js';
 
 // Pi owns provider compatibility and thinking-level semantics. This file owns only the
-// connection-profile schema, the pinned-catalog projection and native ownership checks.
+// profile schema, pinned-catalog projection and managed native ownership checks.
 const here = path.dirname(fileURLToPath(import.meta.url));
 const defaultProfileFile = path.join(here, 'profiles.json');
 const THINKING_LEVELS = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
@@ -33,6 +33,55 @@ function readProfiles(file) {
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const object = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const quote = s => "'" + s.replaceAll("'", "'\\''") + "'";
+const RETRY_KEYS = ['enabled','maxRetries','baseDelayMs','maxAgentDelayMs'];
+function validateRetryPolicy(policy) {
+  if(!object(policy) || Object.keys(policy).length!==RETRY_KEYS.length || RETRY_KEYS.some(key=>!Object.hasOwn(policy,key)))throw Error('retry policy requires exactly: '+RETRY_KEYS.join(', '));
+  if(typeof policy.enabled!=='boolean')throw Error('retry policy enabled must be boolean');
+  for(const key of RETRY_KEYS.slice(1)) {
+    const max=key==='maxRetries'?10:900000;
+    if(!Number.isInteger(policy[key]) || policy[key]<1 || policy[key]>max)throw Error('retry policy '+key+' must be an integer from 1 to '+max);
+  }
+  if(policy.maxAgentDelayMs<policy.baseDelayMs)throw Error('retry policy maxAgentDelayMs must be at least baseDelayMs');
+  return policy;
+}
+function readRetryPolicy(file=path.join(here,'retry-policy.json')) {
+  const info=stat(file);
+  if(!info?.isFile() || info.isSymbolicLink())throw Error('retry policy must be an ordinary file');
+  return validateRetryPolicy(read(file));
+}
+function retrySettings(text) {
+  const settings=text===undefined?{}:JSON.parse(text.replace(/^\uFEFF/,''));
+  if(!object(settings) || (settings.retry!==undefined && !object(settings.retry)))throw Error('native settings and retry must be objects');
+  return settings;
+}
+function checkRetryPolicy(settings, previous, desired) {
+  if(previous!==undefined)validateRetryPolicy(previous);
+  for(const key of RETRY_KEYS) {
+    const value=settings.retry?.[key];
+    if(equal(value,desired[key]) || (previous===undefined ? value===undefined : equal(value,previous[key])))continue;
+    throw Error('managed retry.'+key+' conflicts with native settings; restore the last-applied value or set it to retry-policy.json before retrying');
+  }
+}
+async function retryStorage(cli, dir) {
+  if(!cli)throw Error('native Pi required for retry policy reconciliation');
+  const file=path.resolve(path.dirname(cli),'../core/settings-manager.js');
+  const {FileSettingsStorage}=await import(pathToFileURL(file).href);
+  if(typeof FileSettingsStorage!=='function' || typeof FileSettingsStorage.prototype.withLock!=='function')throw Error('native Pi settings storage unavailable');
+  return new FileSettingsStorage(dir,dir);
+}
+function applyRetryPolicy(storage, dir, previous, desired) {
+  // Package registration creates settings first: Pi's storage locks before reading existing files.
+  const file=path.join(dir,'settings.json'),info=stat(file);
+  if(!info?.isFile() || info.isSymbolicLink())throw Error('native settings must be an ordinary file after package registration');
+  storage.withLock('global',text=>{
+    if(text===undefined)throw Error('native settings disappeared after package registration');
+    const settings=retrySettings(text);
+    checkRetryPolicy(settings,previous,desired);
+    if(RETRY_KEYS.every(key=>equal(settings.retry?.[key],desired[key])))return undefined;
+    settings.retry={...settings.retry,...desired};
+    return JSON.stringify(settings,null,2)+'\n';
+  });
+}
 
 // One named schema for connection profiles; every accepted key is deliberate and unknown keys fail closed.
 function resolveProfiles(data, setup = false) {
@@ -161,7 +210,9 @@ function resourceCheck(dir, resources, state) {
     if(info && (!info.isSymbolicLink() || fs.realpathSync(file)!==fs.realpathSync(target)))
       throw Error('foreign or tampered profile link: ' + name);
   }
-  const settings=read(path.join(dir,'settings.json'));
+  const settingsFile=path.join(dir,'settings.json'),info=stat(settingsFile);
+  if(info && (!info.isFile() || info.isSymbolicLink()))throw Error('native settings must be an ordinary file');
+  const settings=retrySettings(info?fs.readFileSync(settingsFile,'utf8'):undefined);
   if(settings.packages!==undefined && !Array.isArray(settings.packages))throw Error('native packages must be an array');
   if((settings.packages??[]).some(entry=>object(entry) && ownsPackage(entry.source,dir,resources)))throw Error('managed package reference changed');
   if(!state.resources && stat(path.join(dir,'settings.json')))throw Error('foreign profile settings left alone');
@@ -194,7 +245,7 @@ export async function configure(options) {
   if(options.profileScope)return configureProfile(options);
   return project(options);
 }
-async function project({op, dir, root, secretRoot = path.join(root, "secrets"), profiles, profileFile, requireKey = true, cli, expected, profileId, setup = false, resources, dryRun=false, engineBase}) {
+async function project({op, dir, root, secretRoot = path.join(root, "secrets"), profiles, profileFile, requireKey = true, cli, expected, profileId, setup = false, resources, dryRun=false, engineBase, retryPolicyFile}) {
   root = path.resolve(root);dir = path.resolve(dir);
   secretRoot=path.resolve(secretRoot);
   const credentialPath = reference => {
@@ -230,6 +281,7 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
   if(cli && op !== 'uninstall')catalogModel = await verifyCatalog(chosen, cli, expected);
   const selectedProfile = chosen?.profiles[chosen.active];
   const plugins = selectedProfile ? selectPlugins(chosen.plugins, selectedProfile.plugins) : {};
+  const retryPolicy=resources && chosen && op!=='uninstall' ? readRetryPolicy(retryPolicyFile) : undefined;
   const launch = catalogModel
     ? pluginLaunch(plugins, {...catalogModel, baseUrl:selectedProfile.endpoint || catalogModel.baseUrl,
       provider:selectedProfile.provider}, chosen.active,undefined,
@@ -256,7 +308,10 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
     if(state.managed !== undefined && !object(state.managed))throw Error('managed ownership must be an object');
     for(const value of Object.values(state.managed ?? {}))if(!object(value))throw Error('managed entries must be objects');
     if((state.root && path.resolve(state.root) !== root) || (resources && state.resources && !state.root))throw Error('configuration belongs to another SOT');
-    if(resources)resourceCheck(dir,resources,state);
+    if(resources) {
+      const settings=resourceCheck(dir,resources,state);
+      if(retryPolicy)checkRetryPolicy(settings,state.retryPolicy,retryPolicy);
+    }
     const old = state.managed ?? {};
     if(op !== 'uninstall' && !chosen) {
       if(Object.values(old).some(entries => Object.keys(entries).length))throw Error('existing managed connection requires a configured profile; refusing to clear it during setup');
@@ -294,9 +349,14 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
     }
     if(op === 'validate' || dryRun)return chosen ? {profile: chosen.active, provider: chosen.profiles[chosen.active].provider, model: chosen.profiles[chosen.active].model, thinking: chosen.profiles[chosen.active].thinking, plugins, launch} : {};
     if(resources && op!=='uninstall') {
+      const storage=await retryStorage(cli,dir);
       // Record partial provisioning ownership so a failed local package install can be retried.
-      atomic(statePath,{root,profile:chosen.active,managed:old,resources});
+      const partial={root,profile:chosen.active,managed:old,resources,...(state.retryPolicy?{retryPolicy:state.retryPolicy}:{})};
+      atomic(statePath,partial);
       provision(dir,resources,cli);
+      applyRetryPolicy(storage,dir,state.retryPolicy,retryPolicy);
+      // Finalize retry ownership before introducing connection projections on a fresh profile.
+      if(!equal(state.retryPolicy,retryPolicy))atomic(statePath,{...partial,retryPolicy});
     }
     // Failed native removal must leave the recorded connection projections available for retry.
     if(resources && op==='uninstall')removeResources(dir,resources,cli);
@@ -307,11 +367,11 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
       if(!equal(models, read(modelsPath)))atomic(modelsPath, models);
     }
     if(op === 'uninstall') {
-      if(resources)atomic(statePath,{root,profile:state.profile,managed:{},resources});
+      if(resources)atomic(statePath,{root,profile:state.profile,managed:{},resources,...(state.retryPolicy?{retryPolicy:state.retryPolicy}:{})});
       else if(fs.existsSync(statePath))fs.unlinkSync(statePath);
       return {profile: null, provider: null, model: null, thinking: null};
     }
-    atomic(statePath, {root, profile: chosen.active, managed,...(resources?{resources}:{})});
+    atomic(statePath, {root, profile: chosen.active, managed,...(resources?{resources,retryPolicy}:{})});
     return {profile: chosen.active, provider: chosen.profiles[chosen.active].provider, model: chosen.profiles[chosen.active].model, thinking: chosen.profiles[chosen.active].thinking, plugins, launch};
   } finally {if(op !== 'validate' && !dryRun)fs.rmdirSync(lock);}
 }
@@ -380,7 +440,7 @@ if(process.argv[1] === new URL(import.meta.url).pathname || process.argv[1]?.rep
   try {
     const input=localMode ? JSON.parse(fs.readFileSync(0,'utf8')) : {};
     if(localMode && (typeof input.root!=='string' || typeof input.secretRoot!=='string' || typeof input.configured!=='boolean'))throw Error('local configuration reader unavailable');
-    if(op==='schema') {resolveProfiles(input.profiles, setup);process.exit(0);}
+    if(op==='schema') {resolveProfiles(input.profiles, setup);readRetryPolicy();process.exit(0);}
     if(op==='acquire-plugins') {
       const config = resolveProfiles(input.profiles,true);
       const requested = [input.profiles.plugins ?? {},...Object.values(config?.profiles ?? {}).map(x=>x.plugins)];

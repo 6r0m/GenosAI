@@ -14,6 +14,7 @@ install/remove and managed launch disable Pi telemetry explicitly.
 
 - Change a Pi connection
 - Native and compatible models
+- Repository retry policy
 - Pinned runtime
 - Verify
 
@@ -103,6 +104,10 @@ The runtime is installed once. A first profile launch registers the common local
 canonical instructions; later launches verify ownership. File-link permissions must be available on
 Windows; an unavailable canonical link refuses before native dispatch.
 Native preferences are profile-local; base preferences and foreign packages are not copied.
+Pi also caches downloaded `fd` and `rg` executables in each profile's native `bin/` directory.
+Managed launches, reapplication and uninstall/reinstall preserve these caches. A profile or
+platform without a cached tool or a matching executable on `PATH` can download its own copy;
+Windows and WSL keep separate native executable caches.
 After a bootstrap failure, fix the reported local prerequisite and rerun the same profile.
 Partial owned provisioning remains recoverable; a failed registration never dispatches the assistant CLI.
 Raw `pi` uses Pi's native defaults instead of this managed route.
@@ -167,6 +172,40 @@ establish actual billing. The provider's billing remains authoritative.
 
 Native catalog definitions supply their model limits and pricing. Bounded transport checks do not
 establish full-window acceptance or service billing.
+
+## Repository retry policy
+
+[retry-policy.json](retry-policy.json) owns the agent retry policy shared by managed profiles.
+Edit that file to change the policy; [configure.js](configure.js) validates its complete field set,
+boolean enablement, retry count from 1 to 10, and delays from 1 to 900,000 milliseconds, with the
+delay cap at least the base delay. Native Pi owns retry scheduling and error classification.
+Provider retries (`retry.provider.*`), other native preferences and project settings remain native.
+
+Selected-profile installation, lifecycle reapplication and ordinary `pi-sot` launch reconcile the
+policy after native package registration. Each profile receives it independently when selected;
+inactive and retired profiles are not swept. Source updates alone do not change native settings.
+Initialization, validation, package inspection (`list`) and disabled setup do not apply the policy.
+Runtime acquisition preserves profile settings and applies the policy after the runtime is ready.
+
+Reconciliation uses the pinned runtime's settings lock and changes only the policy's named fields.
+An identical policy leaves `settings.json` byte-identical. The existing ownership record keeps
+only the last-applied policy snapshot. Unrelated native edits survive. A native value matching the
+desired policy can be adopted, including recovery after settings were written but ownership
+recording failed. Missing owned fields or values matching neither the recorded policy nor the
+desired policy refuse before dispatch, with the conflicting `retry.<field>` named.
+
+For a conflict, stop editing that profile concurrently, inspect its `settings.json`, the
+`retryPolicy` snapshot in `agents-sot-state.json`, and the repository policy. Restore the conflicting
+field to its recorded value, or deliberately set it to the repository's desired value, then rerun
+the selected launch or install. For an older profile with no snapshot, absent managed fields can
+be initialized; differing existing values require the same explicit reconciliation. Do not delete
+the ownership record to bypass other ownership checks. Uninstall leaves retry values and unrelated
+native preferences in place and retains the snapshot for repeatable reinstallation.
+
+Native project-level `.pi/settings.json` overrides retain Pi's normal precedence and can override
+these profile defaults. Existing live sessions keep their loaded settings; start a new managed
+session to load an updated policy. Errors outside Pi's terminal-error classifier can consume the
+bounded agent retry budget; GenosAI does not add another retry loop.
 
 ## Pinned runtime
 

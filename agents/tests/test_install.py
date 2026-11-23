@@ -477,7 +477,7 @@ class ProviderLifecycle(InstallerWiring):
         os.symlink(shutil.which('node', path=SAFE_PATH), os.path.join(self.runtime_node, 'node'))
         self.cli_source = os.path.join(self.tmp, 'cli.js')
         with open(self.cli_source, 'w') as stream:
-            stream.write("const fs=require('fs'); fs.appendFileSync(process.env.PI_TEST_RECORD, JSON.stringify({args:process.argv.slice(2)})+'\\n'); if(process.env.PI_TEST_FAIL) process.exit(7); if(process.argv[2]==='install'||process.argv[2]==='remove'){const path=require('path'),file=path.join(process.env.PI_CODING_AGENT_DIR,'settings.json');fs.writeFileSync(file,JSON.stringify({packages:process.argv[2]==='install'?[process.argv[3]]:[]}));}\n")
+            stream.write("const fs=require('fs'); fs.appendFileSync(process.env.PI_TEST_RECORD, JSON.stringify({args:process.argv.slice(2)})+'\\n'); if(process.env.PI_TEST_FAIL) process.exit(7); if(process.argv[2]==='install'||process.argv[2]==='remove'){const path=require('path'),file=path.join(process.env.PI_CODING_AGENT_DIR,'settings.json'),data=fs.existsSync(file)?JSON.parse(fs.readFileSync(file)):{};data.packages=(data.packages??[]).filter(x=>x!==process.argv[3]);if(process.argv[2]==='install')data.packages.push(process.argv[3]);fs.writeFileSync(file,JSON.stringify(data));}\n")
         npm = os.path.join(self.runtime_node, 'npm')
         os.symlink(sys.executable, npm)
         for operation in ('ci', 'uninstall'):
@@ -494,6 +494,8 @@ if operation=='ci':
     shutil.copyfile(os.environ['PI_TEST_CLI'],cli)
     args=package/'dist/cli/args.js';args.parent.mkdir(exist_ok=True)
     args.write_text("export function parseArgs(){return {}}")
+    storage=package/'dist/core/settings-manager.js';storage.parent.mkdir(exist_ok=True)
+    storage.write_text("import fs from 'node:fs';import path from 'node:path';export class FileSettingsStorage {constructor(cwd,dir){this.file=path.join(dir,'settings.json')}withLock(scope,fn){const next=fn(fs.existsSync(this.file)?fs.readFileSync(this.file,'utf8'):undefined);if(next!==undefined)fs.writeFileSync(this.file,next)}}")
     locked=json.loads((prefix/'package.json').read_text())['dependencies']['@earendil-works/pi-coding-agent']
     (package/'package.json').write_text(json.dumps({'version':locked}))
     catalog=prefix/'node_modules/@earendil-works/pi-ai/dist/providers/data';catalog.mkdir(parents=True,exist_ok=True)
@@ -663,6 +665,27 @@ else: shutil.rmtree(package)
         with open(models_file) as stream:
             models = json.load(stream)['providers']['deepseek']['models']
         self.assertEqual([model['id'] for model in models], ['deepseek-flash'])
+
+    def test_runtime_reapplication_preserves_native_preferences_and_updates_retry_policy(self):
+        self.prepare_runtime()
+        self.assert_partial_operation(self.lifecycle('install', '--runtime'))
+        settings_file = os.path.join(self.home, '.pi/agent/profiles/primary/settings.json')
+        with open(settings_file) as stream: settings = json.load(stream)
+        with open(os.path.join(self.copy, 'providers/pi/runtime/retry-policy.json')) as stream: policy = json.load(stream)
+        self.assertEqual(settings['retry'], policy)
+        settings.update(theme='synthetic-theme', defaultModel='synthetic-model')
+        settings['retry']['provider'] = {'maxRetries': 0}
+        with open(settings_file, 'w') as stream: json.dump(settings, stream)
+        policy['baseDelayMs'] = 5000
+        with open(os.path.join(self.copy, 'providers/pi/runtime/retry-policy.json'), 'w') as stream: json.dump(policy, stream)
+        self.assert_partial_operation(self.lifecycle('install', '--runtime'))
+        with open(settings_file) as stream: updated = json.load(stream)
+        self.assertEqual(updated, {**settings, 'retry': {**policy, 'provider': {'maxRetries': 0}}})
+        self.assert_partial_operation(self.lifecycle('uninstall', '--runtime'))
+        with open(settings_file) as stream: removed = json.load(stream)
+        self.assertEqual(removed, {**updated, 'packages': []})
+        self.assert_partial_operation(self.lifecycle('install', '--runtime'))
+        with open(settings_file) as stream: self.assertEqual(json.load(stream), updated)
 
     def test_failed_first_locked_install_leaves_retryable_prefix(self):
         self.prepare_runtime()

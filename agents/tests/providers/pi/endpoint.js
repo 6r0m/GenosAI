@@ -10,7 +10,7 @@ import {resolveShell} from '../../../providers/pi/permissions/adapter.js';
 const agents=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..');
 const root=fs.mkdtempSync(path.resolve(agents,'../tmp/pi-endpoint-'));
 const copy=path.join(root,'ai/agents'),runtime=path.join(copy,'providers/pi/runtime'),lifecycle=path.join(copy,'lifecycle');
-for(const relative of ['providers/pi/runtime/launch.sh','providers/pi/runtime/configure.js','providers/pi/runtime/plugins.js','providers/pi/runtime/image-engine.js','providers/pi/runtime/profiles.json','lifecycle/registry.sh','lifecycle/providers.conf.sh','config.py','permissions/run-guard.sh','permissions/guards/_paths.py']) {
+for(const relative of ['providers/pi/runtime/launch.sh','providers/pi/runtime/configure.js','providers/pi/runtime/retry-policy.json','providers/pi/runtime/plugins.js','providers/pi/runtime/image-engine.js','providers/pi/runtime/profiles.json','lifecycle/registry.sh','lifecycle/providers.conf.sh','config.py','permissions/run-guard.sh','permissions/guards/_paths.py']) {
  const target=path.join(copy,relative);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(path.join(agents,relative),target);
 }
 fs.writeFileSync(path.join(root,'ai/config.local.json'),JSON.stringify({pi:{secret_root:path.join(root,'secrets'),ownership_root:root}}));

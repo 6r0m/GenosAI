@@ -62,6 +62,7 @@
     "agents/providers/pi/runtime/plugins.js",
     "agents/providers/pi/runtime/profiles.example.json",
     "agents/providers/pi/runtime/profiles.json",
+    "agents/providers/pi/runtime/retry-policy.json",
     "agents/scripts/README.md",
     "agents/scripts/install.sh",
     "agents/scripts/uninstall.sh",

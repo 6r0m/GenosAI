@@ -34,6 +34,18 @@
 Run on WSL and native Windows. Windows skips WSL installer fixtures explicitly, while gate/adapter tests
 must run, including real process cleanup. Deterministic tests do not prove direct authentication.
 
+The configuration suite's installed-runtime retry acceptance is enabled explicitly on each native
+platform (use that platform's installed pinned CLI path):
+
+```bash
+PI_TEST_NATIVE_CLI=<installed-pi-cli> node --test agents/tests/providers/pi/config.test.js
+```
+
+It checks loaded retry settings, project precedence, a competing native settings writer holding
+the real file lock, preservation through removal/reinstallation, and the pinned retry helper's
+budget, delays and terminal errors using immediate test timers. Without this variable those two
+tests are skipped; synthetic storage fixtures alone do not establish native lock compatibility.
+
 For the installed loader, use each platform's configured native Node:
 
 ```bash

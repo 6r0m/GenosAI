@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {fileURLToPath} from 'node:url';
+import {fileURLToPath,pathToFileURL} from 'node:url';
 import {spawn,spawnSync} from 'node:child_process';
 import {resolveShell} from '../../../providers/pi/permissions/adapter.js';
 import {configure} from '../../../providers/pi/runtime/configure.js';
@@ -51,15 +51,189 @@ function snapshotTree(dir) {
  for(const name of fs.readdirSync(dir).sort()){const file=path.join(dir,name),info=fs.lstatSync(file);output[name]=info.isSymbolicLink()?{link:fs.readlinkSync(file)}:info.isDirectory()?snapshotTree(file):fs.readFileSync(file,'utf8');}
  return output;
 }
+function settingsStub(pkg) {
+ const file=path.join(pkg,'dist/core/settings-manager.js');fs.mkdirSync(path.dirname(file),{recursive:true});
+ fs.writeFileSync(file,`import fs from 'node:fs';import path from 'node:path';
+ export class FileSettingsStorage {
+  constructor(cwd,dir){this.file=path.join(dir,'settings.json');}
+  withLock(scope,fn){const next=fn(fs.existsSync(this.file)?fs.readFileSync(this.file,'utf8'):undefined);if(next!==undefined)fs.writeFileSync(this.file,next);}
+ }`);
+}
 
 function scopedFixture(t) {
  const o=fixture(t),prefix=path.join(o.root,'runtime'),pkg=path.join(prefix,'node_modules/@earendil-works/pi-coding-agent');
  const cli=path.join(pkg,'dist/bundle/cli.js');fs.mkdirSync(path.dirname(cli),{recursive:true});
+ settingsStub(pkg);
  fs.writeFileSync(cli,"if(process.env.PI_TEST_LOCAL_INSTALL_FAIL || (process.argv[2]==='remove' && process.env.PI_TEST_LOCAL_REMOVE_FAIL))process.exit(7);const fs=require('fs'),path=require('path'),dir=process.env.PI_CODING_AGENT_DIR,file=path.join(dir,'settings.json'),data=fs.existsSync(file)?JSON.parse(fs.readFileSync(file)):{};data.packages=(data.packages??[]).filter(x=>x!==process.argv[3]);if(process.argv[2]==='install')data.packages.push(process.argv[3]);fs.writeFileSync(file,JSON.stringify(data));");
  const catalog=path.join(prefix,'node_modules/@earendil-works/pi-ai/dist/providers/data');fs.mkdirSync(catalog,{recursive:true});
  for(const provider of ['deepseek','other'])fs.writeFileSync(path.join(catalog,provider+'.json'),JSON.stringify({models:{a:{id:'a',api:'openai-completions'},b:{id:'b',api:'openai-completions'}}}));
  return {...o,cli,profileScope:true};
 }
+const retryPolicy={enabled:true,maxRetries:5,baseDelayMs:60000,maxAgentDelayMs:900000};
+test('scoped retry policy is projected after package registration and records field ownership',async t=>{
+ const o=scopedFixture(t),{agentDir:dir}=await configure(o);
+ assert.deepEqual(read({dir},'settings.json').retry,retryPolicy);
+ assert.equal(read({dir},'settings.json').packages.length,1);
+ assert.deepEqual(read({dir},'agents-sot-state.json').retryPolicy,retryPolicy);
+});
+test('scoped retry accepts the fifteen-minute cap and updates the earlier managed policy',async t=>{
+ const o=scopedFixture(t),file=path.join(o.root,'previous-policy.json');
+ const previous={enabled:true,maxRetries:5,baseDelayMs:4000,maxAgentDelayMs:60000};
+ fs.writeFileSync(file,JSON.stringify(previous));
+ const {agentDir:dir}=await configure({...o,retryPolicyFile:file});
+ const settingsFile=path.join(dir,'settings.json'),settings=read({dir},'settings.json');
+ settings.theme='preserved';settings.retry.provider={maxRetries:0};fs.writeFileSync(settingsFile,JSON.stringify(settings));
+ fs.writeFileSync(file,JSON.stringify(retryPolicy));
+ await configure({...o,retryPolicyFile:file});
+ assert.deepEqual(read({dir},'settings.json'),{...settings,retry:{...retryPolicy,provider:{maxRetries:0}}});
+ assert.deepEqual(read({dir},'agents-sot-state.json').retryPolicy,retryPolicy);
+});
+test('scoped retry reconciliation preserves native preferences and refuses foreign edits',async t=>{
+ const o=scopedFixture(t),{agentDir:dir}=await configure(o),file=path.join(dir,'settings.json');
+ const settings=read({dir},'settings.json');
+ settings.theme='synthetic';settings.defaultModel='native-model';settings.future={enabled:true};
+ settings.packages.push('npm:foreign');settings.retry={...retryPolicy,provider:{maxRetries:2},future:17};
+ fs.writeFileSync(file,JSON.stringify(settings));
+ const before=fs.readFileSync(file,'utf8'),mtime=fs.statSync(file).mtimeMs;
+ await configure(o);assert.equal(fs.readFileSync(file,'utf8'),before);assert.equal(fs.statSync(file).mtimeMs,mtime);
+ settings.retry.maxRetries=9;fs.writeFileSync(file,JSON.stringify(settings));
+ const drift=snapshotTree(dir);
+ await assert.rejects(configure(o),/retry.maxRetries/);assert.deepEqual(snapshotTree(dir),drift);
+});
+test('scoped retry updates are lazy, isolated and recover after ownership promotion fails',async t=>{
+ const o=scopedFixture(t),policyFile=path.join(o.root,'policy.json');
+ fs.writeFileSync(policyFile,JSON.stringify(retryPolicy));o.retryPolicyFile=policyFile;
+ o.profiles.profiles.second={provider:'other',model:'b',credential:'secrets/b.key'};
+ const first=(await configure(o)).agentDir,second=(await configure({...o,profileId:'second'})).agentDir;
+ const firstBefore=snapshotTree(first),next={...retryPolicy,baseDelayMs:5000};
+ fs.writeFileSync(policyFile,JSON.stringify(next));
+ const file=path.join(second,'settings.json'),settings=read({dir:second},'settings.json');
+ settings.theme='keep';settings.retry.provider={maxRetries:0};fs.writeFileSync(file,JSON.stringify(settings));
+ const rename=fs.renameSync;let promotions=0;
+ const mock=t.mock.method(fs,'renameSync',(source,target)=>{
+  if(target===path.join(second,'agents-sot-state.json') && ++promotions===2)throw Error('synthetic ownership promotion failure');
+  return rename(source,target);
+ });
+ try {await assert.rejects(configure({...o,profileId:'second'}),/synthetic ownership promotion failure/);}
+ finally {mock.mock.restore();}
+ assert.deepEqual(read({dir:second},'settings.json').retry,{...next,provider:{maxRetries:0}});
+ assert.deepEqual(read({dir:second},'agents-sot-state.json').retryPolicy,retryPolicy);
+ await configure({...o,profileId:'second'});
+ assert.deepEqual(read({dir:second},'agents-sot-state.json').retryPolicy,next);
+ assert.equal(read({dir:second},'settings.json').theme,'keep');assert.deepEqual(snapshotTree(first),firstBefore);
+ await configure(o);assert.deepEqual(read({dir:first},'settings.json').retry,next);
+});
+test('scoped retry initial adoption refuses foreign values and accepts desired values',async t=>{
+ const o=scopedFixture(t),{agentDir:dir}=await configure(o),file=path.join(dir,'settings.json'),stateFile=path.join(dir,'agents-sot-state.json');
+ const state=read({dir},'agents-sot-state.json');delete state.retryPolicy;fs.writeFileSync(stateFile,JSON.stringify(state));
+ const settings=read({dir},'settings.json');settings.retry={enabled:false,provider:{maxRetries:0}};fs.writeFileSync(file,JSON.stringify(settings));
+ const before=snapshotTree(dir);await assert.rejects(configure(o),/retry.enabled/);assert.deepEqual(snapshotTree(dir),before);
+ settings.retry={...retryPolicy,provider:{maxRetries:0}};fs.writeFileSync(file,JSON.stringify(settings));
+ const bytes=fs.readFileSync(file,'utf8');await configure(o);assert.equal(fs.readFileSync(file,'utf8'),bytes);
+ assert.deepEqual(read({dir},'agents-sot-state.json').retryPolicy,retryPolicy);
+});
+test('scoped retry first-install interruption finalizes policy ownership before connection promotion',async t=>{
+ const o=scopedFixture(t),dir=path.join(o.dir,'profiles/first'),rename=fs.renameSync;let promotions=0;
+ const mock=t.mock.method(fs,'renameSync',(source,target)=>{
+  if(target===path.join(dir,'agents-sot-state.json') && ++promotions===2)throw Error('synthetic first policy ownership failure');
+  return rename(source,target);
+ });
+ try {await assert.rejects(configure(o),/synthetic first policy ownership failure/);}
+ finally {mock.mock.restore();}
+ assert.deepEqual(read({dir},'settings.json').retry,retryPolicy);
+ assert.equal(fs.existsSync(path.join(dir,'auth.json')),false,'connection promotion must wait until retry ownership is recorded');
+ await configure(o);assert.deepEqual(read({dir},'agents-sot-state.json').retryPolicy,retryPolicy);
+});
+test('scoped retry policy and native file validation refuse before mutation',async t=>{
+ const o=scopedFixture(t),file=path.join(o.root,'policy.json');o.retryPolicyFile=file;
+ for(const value of [null,[],{...retryPolicy,extra:1},{...retryPolicy,enabled:1},{...retryPolicy,maxRetries:0},{...retryPolicy,maxRetries:11},{...retryPolicy,baseDelayMs:1.5},{...retryPolicy,maxAgentDelayMs:900001},{...retryPolicy,maxAgentDelayMs:1}]) {
+  fs.writeFileSync(file,JSON.stringify(value));await assert.rejects(configure(o),/retry policy|configuration must be an object/);assert.deepEqual(fs.readdirSync(o.dir),[]);
+ }
+ fs.unlinkSync(file);await assert.rejects(configure(o),/retry policy/);assert.deepEqual(fs.readdirSync(o.dir),[]);
+ const policyTarget=path.join(o.root,'linked-policy.json');fs.writeFileSync(policyTarget,JSON.stringify(retryPolicy));fs.symlinkSync(policyTarget,file,'file');
+ await assert.rejects(configure(o),/ordinary file/);assert.deepEqual(fs.readdirSync(o.dir),[]);fs.unlinkSync(file);
+ fs.writeFileSync(file,JSON.stringify(retryPolicy));
+ const {agentDir:dir}=await configure(o),settingsFile=path.join(dir,'settings.json'),original=fs.readFileSync(settingsFile,'utf8');
+ for(const text of ['{bad','[]','{"retry":false}']) {
+  fs.writeFileSync(settingsFile,text);const before=snapshotTree(dir);await assert.rejects(configure(o));assert.deepEqual(snapshotTree(dir),before);
+ }
+ const target=path.join(o.root,'outside.json');fs.writeFileSync(target,original);fs.unlinkSync(settingsFile);fs.symlinkSync(target,settingsFile,'file');
+ const before=snapshotTree(dir);await assert.rejects(configure(o),/symbolic/);assert.deepEqual(snapshotTree(dir),before);assert.equal(fs.readFileSync(target,'utf8'),original);
+ fs.unlinkSync(settingsFile);fs.mkdirSync(settingsFile);await assert.rejects(configure(o),/ordinary file/);fs.rmdirSync(settingsFile);
+ const missing=snapshotTree(dir);await assert.rejects(configure(o),/retry.enabled/);assert.deepEqual(snapshotTree(dir),missing,'missing owned values must not silently replace native edits');
+});
+test('scoped retry validation and inspection do not apply a changed policy',async t=>{
+ const o=scopedFixture(t),{agentDir:dir}=await configure(o),file=path.join(o.root,'policy.json');
+ fs.writeFileSync(file,JSON.stringify({...retryPolicy,maxRetries:6}));o.retryPolicyFile=file;
+ const before=snapshotTree(o.dir);
+ await configure({...o,op:'validate'});await configure({...o,op:'inspect'});
+ assert.deepEqual(snapshotTree(o.dir),before);
+ await configure({...o,op:'uninstall'});
+ assert.deepEqual(read({dir},'settings.json').retry,retryPolicy);
+ await configure(o);assert.deepEqual(read({dir},'settings.json').retry,{...retryPolicy,maxRetries:6});
+});
+test('installed Pi retry settings use the native lock, load normally and preserve concurrent writes', {skip:!process.env.PI_TEST_NATIVE_CLI},async t=>{
+ const o={...fixture(t),cli:process.env.PI_TEST_NATIVE_CLI,expected:'1.5.2',profileScope:true,profiles:one('deepseek','deepseek-flash')};
+ const {agentDir:dir}=await configure(o),pkg=path.resolve(path.dirname(o.cli),'../..');
+ const moduleUrl=pathToFileURL(path.join(pkg,'dist/core/settings-manager.js')).href;
+ const {SettingsManager}=await import(moduleUrl);
+ assert.deepEqual(SettingsManager.create(o.root,dir).getRetrySettings(),retryPolicy);
+ assert.equal(SettingsManager.create(o.root,dir).getProviderRetrySettings().maxRetries,undefined);
+ const policyFile=path.join(o.root,'policy.json'),next={...retryPolicy,baseDelayMs:5000};fs.writeFileSync(policyFile,JSON.stringify(next));
+ const helper=path.join(o.root,'native-writer.mjs'),ready=path.join(o.root,'writer-ready');
+ fs.writeFileSync(helper,`import fs from 'node:fs';import {FileSettingsStorage} from ${JSON.stringify(moduleUrl)};
+ new FileSettingsStorage(process.argv[2],process.argv[2]).withLock('global',text=>{
+  const data=JSON.parse(text);fs.writeFileSync(process.argv[3],'locked');
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,120);
+  data.theme='concurrent-native';data.retry.provider={maxRetries:0};return JSON.stringify(data);
+ });`);
+ const writer=spawn(process.execPath,[helper,dir,ready],{stdio:['ignore','pipe','pipe']});
+ let errors='';writer.stderr.on('data',chunk=>errors+=chunk);
+ const exited=new Promise((resolve,reject)=>{writer.on('error',reject);writer.on('exit',code=>code===0?resolve():reject(Error(errors)));});
+ t.after(()=>{if(writer.exitCode===null)writer.kill();});
+ const until=Date.now()+10000;
+ while(!fs.existsSync(ready)){if(Date.now()>until || writer.exitCode!==null)throw Error('native writer failed to acquire lock: '+errors);await new Promise(resolve=>setTimeout(resolve,5));}
+ assert.ok(fs.existsSync(path.join(dir,'settings.json.lock')),'native settings lock must be held at reconciliation start');
+ await configure({...o,retryPolicyFile:policyFile});await exited;
+ const loaded=read({dir},'settings.json');assert.equal(loaded.theme,'concurrent-native');
+ assert.deepEqual(loaded.retry,{...next,provider:{maxRetries:0}});
+ assert.deepEqual(SettingsManager.create(o.root,dir).getRetrySettings(),next);
+ const bytes=fs.readFileSync(path.join(dir,'settings.json'),'utf8');await configure({...o,retryPolicyFile:policyFile});assert.equal(fs.readFileSync(path.join(dir,'settings.json'),'utf8'),bytes);
+ const lock=path.join(dir,'settings.json.lock');fs.mkdirSync(lock);
+ try {
+  const before=snapshotTree(dir);
+  await assert.rejects(configure({...o,retryPolicyFile:policyFile}),error=>error.code==='ELOCKED');
+  assert.deepEqual(snapshotTree(dir),before,'native lock exhaustion must leave settings and ownership unchanged');
+ } finally {fs.rmdirSync(lock);}
+ const project=path.join(o.root,'project/.pi');fs.mkdirSync(project,{recursive:true});fs.writeFileSync(path.join(project,'settings.json'),JSON.stringify({retry:{maxRetries:1}}));
+ assert.equal(SettingsManager.create(path.dirname(project),dir).getRetrySettings().maxRetries,1);
+ await configure({...o,op:'uninstall'});assert.equal(read({dir},'settings.json').theme,'concurrent-native');
+ await configure({...o,retryPolicyFile:policyFile});assert.equal(read({dir},'settings.json').theme,'concurrent-native');
+});
+test('installed Pi retry helper enforces the policy budget, schedule, reset and terminal errors', {skip:!process.env.PI_TEST_NATIVE_CLI},async t=>{
+ const pkg=path.resolve(path.dirname(process.env.PI_TEST_NATIVE_CLI),'../..');
+ const ai=[path.join(pkg,'node_modules/@earendil-works/pi-ai'),path.join(path.dirname(pkg),'pi-ai')].find(file=>fs.existsSync(file));
+ const {retryAssistantCall,retryDelayMs}=await import(pathToFileURL(path.join(ai,'dist/utils/retry.js')).href);
+ const {retryProviderRequest}=await import(pathToFileURL(path.join(ai,'dist/utils/provider-retry.js')).href);
+ assert.deepEqual([1,2,3,4,5].map(attempt=>retryDelayMs(retryPolicy,attempt)),[60000,120000,240000,480000,900000]);
+ const waits=[],realTimer=globalThis.setTimeout;
+ const timer=t.mock.method(globalThis,'setTimeout',(fn,ms,...args)=>{
+  if(ms>=retryPolicy.baseDelayMs && ms<=retryPolicy.maxAgentDelayMs){waits.push(ms);queueMicrotask(()=>fn(...args));return 0;}
+  return realTimer(fn,ms,...args);
+ });
+ const failure={role:'assistant',stopReason:'error',errorMessage:'503 service unavailable'},success={role:'assistant',stopReason:'stop'};
+ try {
+  let calls=0;await retryAssistantCall(async()=>{calls++;return failure;},retryPolicy);assert.equal(calls,6);assert.deepEqual(waits,[60000,120000,240000,480000,900000]);
+  for(let run=0;run<2;run++) {let calls=0;const scheduled=[];assert.equal(await retryAssistantCall(async()=>++calls===1?failure:success,retryPolicy,undefined,{onRetryScheduled:attempt=>scheduled.push(attempt)}),success);assert.deepEqual(scheduled,[1]);}
+  for(const errorMessage of ['401 unauthorized','429 insufficient_quota','429 billing hard limit reached','429 out of budget']) {
+   let calls=0;await retryAssistantCall(async()=>{calls++;return {...failure,errorMessage};},retryPolicy);assert.equal(calls,1,errorMessage);
+  }
+  calls=0;await retryAssistantCall(async()=>{calls++;return {role:'assistant',stopReason:'aborted'};},retryPolicy);assert.equal(calls,1);
+  const controller=new AbortController();calls=0;
+  const cancelled=await retryAssistantCall(async()=>{calls++;return failure;},retryPolicy,controller.signal,{onRetryScheduled:()=>controller.abort()});assert.equal(cancelled.stopReason,'aborted');assert.equal(calls,1);
+  calls=0;await assert.rejects(retryProviderRequest(async()=>{calls++;throw Object.assign(Error('503 service unavailable'),{status:503});},{}));assert.equal(calls,1,'provider retries remain disabled by default');
+ } finally {timer.mock.restore();}
+});
 test('scoped profiles preserve earlier provider and same-provider credential references',async t=>{
  const o=scopedFixture(t),profiles=one();
  profiles.profiles.second={provider:'other',model:'b',credential:'secrets/b.key'};
@@ -111,9 +285,13 @@ test('scoped failed provisioning retries and runtime-free removal preserves nati
  const dir=path.join(o.dir,'profiles/first');assert.equal(fs.existsSync(path.join(dir,'auth.json')),false);
  await configure(o);
  const file=path.join(dir,'settings.json'),settings=JSON.parse(fs.readFileSync(file));settings.theme='synthetic-theme';settings.packages.push('npm:synthetic-foreign');fs.writeFileSync(file,JSON.stringify(settings));
+ const bin=path.join(dir,'bin'),fd=path.join(bin,process.platform==='win32'?'fd.exe':'fd');fs.mkdirSync(bin);fs.writeFileSync(fd,'native-owned-cache');
+ const cached=fs.readFileSync(fd),mtime=fs.statSync(fd).mtimeMs;
+ await configure(o);await configure(o);assert.deepEqual(fs.readFileSync(fd),cached);assert.equal(fs.statSync(fd).mtimeMs,mtime);
  await configure({...o,op:'uninstall',cli:undefined});
  assert.deepEqual(JSON.parse(fs.readFileSync(file)),{...settings,packages:['npm:synthetic-foreign']});
  await configure(o);assert.equal(JSON.parse(fs.readFileSync(file)).theme,'synthetic-theme');
+ assert.deepEqual(fs.readFileSync(fd),cached);assert.equal(fs.statSync(fd).mtimeMs,mtime);
 });
 test('scoped package removal failure preserves projections and permits a normal retry',async t=>{
  const o=scopedFixture(t),{agentDir:dir}=await configure(o);
@@ -356,7 +534,7 @@ test('concurrent native projections keep one consistent owner',async t=>{
 test('SOT-only changes select native managed launch on each platform',t=>{
  const o=fixture(t),repo=o.root;
  const runtime=path.join(repo,'ai/agents/providers/pi/runtime'),lifecycle=path.join(repo,'ai/agents/lifecycle');
- for(const [source,target] of [['providers/pi/runtime/launch.sh',path.join(runtime,'launch.sh')],['providers/pi/runtime/configure.js',path.join(runtime,'configure.js')],['providers/pi/runtime/plugins.js',path.join(runtime,'plugins.js')],['providers/pi/runtime/image-engine.js',path.join(runtime,'image-engine.js')],['providers/pi/runtime/profiles.json',path.join(runtime,'profiles.json')],['lifecycle/registry.sh',path.join(lifecycle,'registry.sh')],['lifecycle/providers.conf.sh',path.join(lifecycle,'providers.conf.sh')]]) {
+ for(const [source,target] of [['providers/pi/runtime/launch.sh',path.join(runtime,'launch.sh')],['providers/pi/runtime/configure.js',path.join(runtime,'configure.js')],['providers/pi/runtime/retry-policy.json',path.join(runtime,'retry-policy.json')],['providers/pi/runtime/plugins.js',path.join(runtime,'plugins.js')],['providers/pi/runtime/image-engine.js',path.join(runtime,'image-engine.js')],['providers/pi/runtime/profiles.json',path.join(runtime,'profiles.json')],['lifecycle/registry.sh',path.join(lifecycle,'registry.sh')],['lifecycle/providers.conf.sh',path.join(lifecycle,'providers.conf.sh')]]) {
   fs.mkdirSync(path.dirname(target),{recursive:true});
   fs.copyFileSync(fileURLToPath(new URL('../../../'+source,import.meta.url)),target);
  }
@@ -372,6 +550,7 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  const prefix=path.join(home,win?'AppData/Roaming/pi-sot':'.local/share/pi-sot');
  const packageDir=path.join(prefix,'node_modules/@earendil-works/pi-coding-agent');
  const cli=path.join(packageDir,'dist/bundle/cli.js');fs.mkdirSync(path.dirname(cli),{recursive:true});
+ settingsStub(packageDir);
  const argsFixture=path.join(packageDir,'dist/cli/args.js');
  fs.mkdirSync(path.dirname(argsFixture),{recursive:true});
  fs.writeFileSync(argsFixture,`export function parseArgs(args) {
@@ -414,6 +593,19 @@ test('SOT-only changes select native managed launch on each platform',t=>{
   assert.deepEqual(Object.keys(generated),[alternate.provider]);
   assert.equal(generated[alternate.provider].baseUrl,alternate.endpoint);
  }
+ const retryFile=path.join(runtime,'retry-policy.json'),retrySource=fs.readFileSync(retryFile,'utf8');
+ const firstDir=path.join(home,'.pi/agent/profiles/deepseek-direct'),alternateDir=path.join(home,'.pi/agent/profiles/alternate');
+ const firstSnapshot=snapshotTree(firstDir),alternateSettings=path.join(alternateDir,'settings.json');
+ fs.writeFileSync(retryFile,JSON.stringify({...retryPolicy,baseDelayMs:5000}));
+ const alternateBefore=snapshotTree(alternateDir);
+ result=launch('--profile','alternate','list');assert.equal(result.status,0,result.stderr);assert.deepEqual(snapshotTree(alternateDir),alternateBefore);
+ result=launch('--profile','alternate');assert.equal(result.status,0,result.stderr);
+ assert.equal(JSON.parse(fs.readFileSync(alternateSettings)).retry.baseDelayMs,5000);assert.deepEqual(snapshotTree(firstDir),firstSnapshot);
+ const settings=JSON.parse(fs.readFileSync(alternateSettings));settings.retry.maxRetries=9;fs.writeFileSync(alternateSettings,JSON.stringify(settings));
+ const drift=snapshotTree(alternateDir),dispatchBefore=fs.readFileSync(record,'utf8');
+ result=launch('--profile','alternate');assert.notEqual(result.status,0);assert.match(result.stderr,/retry.maxRetries/);
+ assert.deepEqual(snapshotTree(alternateDir),drift);assert.equal(fs.readFileSync(record,'utf8'),dispatchBefore);
+ settings.retry.maxRetries=retryPolicy.maxRetries;fs.writeFileSync(alternateSettings,JSON.stringify(settings));fs.writeFileSync(retryFile,retrySource);
  if(win) {
   const baseEnv={...process.env,PI_TEST_HOME:home,PI_TEST_RECORD:record};
   const converted=spawnSync(resolveShell(),['-c','cygpath -u "$PI_TEST_HOME"'],{env:baseEnv,encoding:'utf8'});
