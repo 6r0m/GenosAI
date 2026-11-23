@@ -60,13 +60,16 @@
 
   // Codex uses its native versioned writer; unrelated native settings survive.
   // These repeat conservative defaults for visibility. Omit to inherit them.
-  "codex": {"approval_policy": "on-request", "sandbox_mode": "workspace-write"},
-  // Optional private model preferences. Only fields present here are managed;
-  // an omitted field keeps its native value. Removing one stops managing it but
-  // leaves the last written value until changed natively. Values are not checked
-  // against a model catalog, so installing one does not prove account access.
-  // , "model": "installed-codex-model-id"
-  // , "model_reasoning_effort": "high"
+  "codex": {
+    "approval_policy": "on-request",
+    "sandbox_mode": "workspace-write"
+    // Optional private model preferences. Only fields present here are managed;
+    // an omitted field keeps its native value. Removing one stops managing it but
+    // leaves the last written value until changed natively. Values are not checked
+    // against a model catalog, so installing one does not prove account access.
+    // , "model": "installed-codex-model-id"
+    // , "model_reasoning_effort": "high"
+  },
 
   // Pi remains disabled until you define AND select your own profile.
   // A profile ID is an arbitrary local label. Provider/model IDs must match the

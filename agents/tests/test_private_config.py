@@ -33,6 +33,27 @@ class PrivateConfiguration(unittest.TestCase):
             with self.subTest(extra=extra), self.assertRaises(config.ConfigError):
                 config.parse(json.dumps({'codex': {**base, **extra}}).encode())
 
+    def test_example_activates_optional_codex_preferences_inside_codex(self):
+        raw = (AI / "config.local.example.jsonc").read_text(encoding="utf-8")
+        values = {"model": "installed-codex-model-id", "model_reasoning_effort": "high"}
+        comments = {key: '// , "%s": "%s"' % (key, value) for key, value in values.items()}
+        for comment in comments.values():
+            self.assertEqual(raw.count(comment), 1, "the shipped example no longer offers: " + comment)
+
+        def activated(keys):
+            text = raw
+            for key in keys:
+                text = text.replace(comments[key], comments[key][len('// '):], 1)
+            return config.parse(text.encode(), commented=True)
+
+        defaults = {'approval_policy': 'on-request', 'sandbox_mode': 'workspace-write'}
+        for keys in (('model',), ('model_reasoning_effort',), tuple(values)):
+            with self.subTest(keys=keys):
+                parsed = activated(keys)
+                self.assertEqual(parsed['codex'], {**defaults, **{key: values[key] for key in keys}})
+                self.assertNotIn('model', parsed, "an uncommented preference must stay inside codex")
+                self.assertNotIn('model_reasoning_effort', parsed)
+
     def test_jsonc_preserves_strings_and_rejects_ambiguous_or_malformed_input(self):
         example=b'{/* setup */"browser":{"cdp_url":"http://127.0.0.1:9222/a//b"},"pi":{"active":null,"profiles":{}}}// end'
         self.assertEqual(config.parse(example,True)['browser']['cdp_url'],'http://127.0.0.1:9222/a//b')

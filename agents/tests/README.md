@@ -11,7 +11,7 @@ checks, permission guards, and isolated installer fixtures.
 
 | file | proves |
 |---|---|
-| `test_private_config.py` | the browser example is disabled; Codex model preferences accept only explicit non-empty strings while the example stays valid; AI-local ignore rules exclude private configuration and backups in a standalone disposable repository; canonical skill resolution works through a POSIX symlink or a real native Windows junction with spaces |
+| `test_private_config.py` | the browser example is disabled; Codex model preferences accept only explicit non-empty strings, and uncommenting the example activates both optional Codex fields inside `codex`; AI-local ignore rules exclude private configuration and backups in a standalone disposable repository; canonical skill resolution works through a POSIX symlink or a real native Windows junction with spaces |
 | `test_preparation.py` | conservative public defaults, external credential references and model-helper argument/refusal behavior (model scripts run on Linux/WSL) |
 | `test_pi_paths.py` | shared WSL/native drive projection and canonical ownership fallback during broken-local removal |
 | `test_release.py` | private-file export exclusion, forbidden artifacts, personal-path controls, scanner detection/error distinction, force-added keys, history, and clean shared setup/removal |
