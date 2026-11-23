@@ -1,5 +1,6 @@
 """Standalone preparation contracts, with synthetic state and no provider traffic."""
 import json
+import importlib.util
 import os
 from pathlib import Path
 import shutil
@@ -10,6 +11,78 @@ import unittest
 import skilltree as ST
 
 AI = Path(__file__).resolve().parents[2]
+spec=importlib.util.spec_from_file_location('preparation_release',AI/'tools/release.py')
+release=importlib.util.module_from_spec(spec);spec.loader.exec_module(release)
+
+
+@unittest.skipUnless(shutil.which('bash'), 'source checks require Bash')
+class SetupChecks(unittest.TestCase):
+    def setUp(self):
+        scratch=AI/'tmp';scratch.mkdir(exist_ok=True)
+        temporary=tempfile.TemporaryDirectory(prefix='setup-check-',dir=scratch)
+        self.addCleanup(temporary.cleanup)
+        self.base=Path(temporary.name);self.root=self.base/'source with spaces';self.root.mkdir()
+        for source in release.source_files(AI):
+            target=self.root/source.relative_to(AI);target.parent.mkdir(parents=True,exist_ok=True);shutil.copy(source,target)
+        self.home=self.base/'home';self.home.mkdir();(self.home/'sentinel').write_text('native state survives')
+        self.env=dict(os.environ,HOME=str(self.home),USERPROFILE=str(self.home),PYTHONDONTWRITEBYTECODE='1')
+        self.policy=self.root/'agents/providers/pi/runtime/retry-policy.json'
+
+    def check(self, no_node=False, make=False):
+        script=self.root/'tools/setup.py'
+        command=[sys.executable,str(script),'check']
+        if make: command=['make','check','PYTHON="'+Path(sys.executable).as_posix()+'"']
+        if no_node:
+            bootstrap=self.base/'no-node.py'
+            bootstrap.write_text('''import pathlib,runpy,shutil,subprocess,sys
+from unittest.mock import patch
+which,run=shutil.which,subprocess.run
+def without_node(args,*positional,**keywords):
+    if pathlib.Path(args[0]).name in ('node','node.exe'): raise FileNotFoundError('Node unavailable in fixture')
+    return run(args,*positional,**keywords)
+sys.argv=sys.argv[1:]
+sys.path.insert(0,str(pathlib.Path(sys.argv[0]).parent))
+with patch('shutil.which',side_effect=lambda name,*args,**kwargs: None if name=='node' else which(name,*args,**kwargs)), patch('subprocess.run',side_effect=without_node):
+    runpy.run_path(sys.argv[0],run_name='__main__')
+''')
+            command=[sys.executable,str(bootstrap),str(script),'check']
+        def snapshot(root):
+            return {p.relative_to(root).as_posix():None if p.is_dir() else p.read_bytes() for p in root.rglob('*')}
+        before=snapshot(self.root),snapshot(self.home)
+        result=subprocess.run(command,cwd=self.root,env=self.env,capture_output=True,text=True,timeout=60)
+        self.assertEqual((snapshot(self.root),snapshot(self.home)),before,'checks must not mutate source, local input or native state')
+        return result
+
+    @unittest.skipUnless(shutil.which('node') and shutil.which('make'), 'Node and Make required')
+    def test_make_check_validates_retry_policy_with_disabled_pi(self):
+        valid=json.loads(self.policy.read_text())
+        result=self.check(make=True);self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+        for text in ('{broken',json.dumps({**valid,'enabled':'yes'})):
+            with self.subTest(text=text):
+                self.policy.write_text(text)
+                result=self.check(make=True)
+                self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+                self.assertIn('pi-config:',result.stderr)
+
+    def test_disabled_pi_without_node_checks_json_syntax_and_reports_schema_gap(self):
+        valid=json.loads(self.policy.read_text())
+        for value in (valid,{**valid,'enabled':'yes'}):
+            self.policy.write_text(json.dumps(value))
+            result=self.check(no_node=True)
+            self.assertEqual(result.returncode,0,result.stdout+result.stderr)
+            self.assertIn('JSON syntax only',result.stdout)
+        self.policy.write_text('{broken')
+        result=self.check(no_node=True)
+        self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+
+    def test_configured_pi_or_plugins_still_require_node_for_schema_checks(self):
+        for pi in ({'active':'first','profiles':{'first':{'provider':'deepseek','model':'deepseek-flash','credential':'secrets/fixture.key'}}},
+                   {'plugins':{'image-budget':{'maxImages':8}}}):
+            with self.subTest(pi=pi):
+                (self.root/'config.local.json').write_text(json.dumps({'pi':pi}))
+                result=self.check(no_node=True)
+                self.assertNotEqual(result.returncode,0,result.stdout+result.stderr)
+                self.assertIn('Node unavailable in fixture',result.stderr)
 
 
 class Preparation(unittest.TestCase):

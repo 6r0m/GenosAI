@@ -1,6 +1,12 @@
 # Source preparation and release
 
-`make check` validates source syntax and local metadata. `make test` exercises the component contracts
+`make check` validates source syntax and local metadata, including public JSON syntax with optional
+integrations disabled. When Node is on `PATH`, it also runs Pi's canonical profile and retry-policy
+schema checks without requiring an installed Pi runtime. Without Node, disabled Pi receives JSON
+syntax checks only and reports the skipped schema validation; configured Pi profiles or plugins
+still require Node.
+
+`make test` exercises the component contracts
 without real provider traffic. `make public-check` requires Gitleaks 8.30.1: it proves a synthetic secret
 is detected, scans a source-only working snapshot, and rejects personal-path candidates. In an independent
 Git repository it also scans the staged snapshot and distributed history; ancestor repositories
