@@ -8,6 +8,11 @@ import subprocess
 import tempfile
 import unittest
 
+try:
+    import pwd
+except ImportError:
+    pwd = None
+
 HELPER = Path(__file__).resolve().parents[1] / "lifecycle/platform-paths.sh"
 BASH = shutil.which("bash")
 
@@ -26,6 +31,15 @@ class HostFamily(unittest.TestCase):
                                         capture_output=True, text=True, timeout=20)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout.strip(), expected)
+
+
+@unittest.skipUnless(BASH and pwd and shutil.which("getent"), "requires the POSIX account database")
+class AccountHome(unittest.TestCase):
+    def test_account_home_matches_the_password_database(self):
+        result = subprocess.run([BASH, "-c", 'source "$1"; account_home', "fixture", HELPER.as_posix()],
+                                capture_output=True, text=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), pwd.getpwuid(os.getuid()).pw_dir)
 
 
 @unittest.skipUnless(BASH, "requires Bash")

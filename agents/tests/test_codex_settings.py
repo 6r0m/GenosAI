@@ -186,44 +186,55 @@ class CodexSettings(unittest.TestCase):
         self.assertIn("CODEX_HOME", env["WSLENV"].split(":"))
         self.assertEqual(popen.call_args.kwargs["cwd"], "/mnt/c")
 
-    def test_wsl_discovery_falls_back_to_the_login_shell(self):
+    def test_login_shell_discovery_is_limited_to_the_account_home(self):
         with tempfile.TemporaryDirectory(dir=Path(ST.REPO) / "tmp") as temporary:
-            runtime = Path(temporary) / "codex"
-            runtime.touch()
+            root = Path(temporary)
+            home = root / "home"; home.mkdir()
+            other = root / "other"; other.mkdir()
+            binaries = root / "bin"; binaries.mkdir()
+            runtime = binaries / "codex"
+            runtime.write_text("#!/bin/sh\nexit 0\n")
+            runtime.chmod(0o755)
+            lifecycle = str(Path(ST.AGENTS) / "providers/codex/lifecycle.sh")
             script = r'''
 source "$1"
+account_home() { printf '%s\n' "${ACCOUNT_HOME-}"; }
 declare -A PROVIDER_DIR=([codex]=.codex)
 operation=install
 AI_ROOT=fixture
 FAILED=0
 generic() { :; }
-type() { return 1; }
-timeout() { shift; "$@"; }
-bash() { [[ -n "${FAKE_CODEX-}" ]] && printf '%s\n' "$FAKE_CODEX"; }
 python3() { printf 'resolved:%s\n' "$5"; }
 codex codex wsl "$2"
 exit "$FAILED"
 '''
-            lifecycle = str(Path(ST.AGENTS) / "providers/codex/lifecycle.sh")
 
-            def probe(found):
-                env = dict(os.environ)
-                if found:
-                    env["FAKE_CODEX"] = str(runtime)
-                else:
-                    env.pop("FAKE_CODEX", None)
-                return subprocess.run(["bash", "-c", script, "fixture", lifecycle, temporary],
-                                      env=env, capture_output=True, text=True, timeout=30)
+            def run(profile, account, marker=None):
+                (home / ".profile").write_text(profile)
+                env = dict(os.environ, HOME=str(home), PATH="/usr/bin:/bin",
+                           ACCOUNT_HOME=str(account) if account else "")
+                if marker:
+                    env["PROFILE_MARKER"] = str(marker)
+                return subprocess.run(["bash", "-c", script, "fixture", lifecycle, str(home)],
+                                      env=env, capture_output=True, text=True, timeout=60)
 
-            hit = probe(True)
-            self.assertEqual(hit.returncode, 0, hit.stdout + hit.stderr)
-            self.assertIn("resolved:" + str(runtime), hit.stdout)
-            self.assertIn("Codex runtime from the login shell", hit.stdout)
+            resolved = run('export PATH="' + str(binaries) + ':/usr/bin:/bin"\n', home)
+            self.assertEqual(resolved.returncode, 0, resolved.stdout + resolved.stderr)
+            self.assertIn("resolved:" + str(runtime), resolved.stdout)
+            self.assertIn("Codex runtime from the login shell", resolved.stdout)
 
-            missed = probe(False)
-            self.assertEqual(missed.returncode, 1)
-            self.assertIn("PATH or in a login shell", missed.stderr)
-            self.assertNotIn("resolved:", missed.stdout)
+            switched = run('export HOME="' + str(other) + '"\nexport PATH="'
+                           + str(binaries) + ':/usr/bin:/bin"\n', home)
+            self.assertEqual(switched.returncode, 1)
+            self.assertNotIn("resolved:", switched.stdout)
+            self.assertIn("Codex executable not found", switched.stderr)
+
+            marker = root / "profile-sourced"
+            alternate = run('printf sourced > "$PROFILE_MARKER"\nexport PATH="'
+                            + str(binaries) + ':/usr/bin:/bin"\n', other, marker)
+            self.assertEqual(alternate.returncode, 1)
+            self.assertNotIn("resolved:", alternate.stdout)
+            self.assertFalse(marker.exists(), "an alternate home must not run login initialization")
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "WSL lifecycle shell")
     def test_windows_discovery_skips_extensionless_npm_launcher(self):

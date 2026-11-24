@@ -8,6 +8,12 @@ host_family() {
   esac
 }
 
+# The account home from the password database. Login-shell discovery is limited to
+# that home; an isolated or alternate HOME must not load another account environment.
+account_home() {
+  getent passwd "$(id -u)" 2>/dev/null | head -n 1 | cut -d: -f6
+}
+
 windows_profile() {
   local profile cwd=/
   [[ ! -d /mnt/c ]] || cwd=/mnt/c
