@@ -518,7 +518,7 @@ if operation=='ci':
     locked=json.loads((prefix/'package.json').read_text())['dependencies']['@earendil-works/pi-coding-agent']
     (package/'package.json').write_text(json.dumps({'version':locked}))
     catalog=prefix/'node_modules/@earendil-works/pi-ai/dist/providers/data';catalog.mkdir(parents=True,exist_ok=True)
-    data={'models':{'flash':{'id':'deepseek-flash','api':'openai-completions'},'other':{'id':'fixture-model','api':'openai-completions'}}}
+    data={'models':{'flash':{'id':'deepseek-flash','api':'openai-completions','contextWindow':1000000},'other':{'id':'fixture-model','api':'openai-completions'}}}
     for provider in ('deepseek','fixture'): (catalog/(provider+'.json')).write_text(json.dumps(data))
     (catalog.parent.parent/'index.js').write_text("export function getSupportedThinkingLevels(){return ['off','low','high','max']}")
 else: shutil.rmtree(package)

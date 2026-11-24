@@ -142,11 +142,13 @@ def validate(value):
                               or any(ord(character) < 32 for character in text)):
             raise ConfigError('invalid Codex ' + name.replace('_',' '))
     pi=value.get('pi', {})
-    _fields(pi, ('active','profiles','secret_root','ownership_root','plugins'), 'Pi')
+    _fields(pi, ('active','profiles','secret_root','ownership_root','plugins','hide_thinking_block'), 'Pi')
     if pi.get('active') is not None and not isinstance(pi['active'],str):
         raise ConfigError('invalid Pi selection')
     if not isinstance(pi.get('profiles',{}),dict): raise ConfigError('invalid Pi profiles')
     if not isinstance(pi.get('plugins',{}),dict): raise ConfigError('invalid Pi plugins')
+    if 'hide_thinking_block' in pi and not isinstance(pi['hide_thinking_block'],bool):
+        raise ConfigError('Pi hide_thinking_block must be boolean')
     for key in ('secret_root','ownership_root'):
         if key in pi and (not isinstance(pi[key],str) or not pi[key]): raise ConfigError('invalid Pi path')
 
@@ -218,6 +220,7 @@ def pi_input(platform='host', removing=False):
             raise ConfigError('cannot resolve the Pi input path for this platform') from None
     return {'configured':pi.get('active') is not None, 'root':portable(pi.get('ownership_root',str(root))),
             'secretRoot':portable(pi.get('secret_root',str(root/'secrets'))),
+            **({'hideThinkingBlock':pi['hide_thinking_block']} if 'hide_thinking_block' in pi else {}),
             'profiles':{'active':pi.get('active'),'profiles':pi.get('profiles',{}),'plugins':pi.get('plugins',{})}}
 
 if __name__ == "__main__":

@@ -19,6 +19,14 @@ class PrivateConfiguration(unittest.TestCase):
         example = config.parse((AI / "config.local.example.jsonc").read_bytes(), commented=True)
         self.assertIsNone(example["browser"]["cdp_url"])
 
+    def test_pi_thinking_display_default_accepts_only_booleans(self):
+        for value in (True, False):
+            raw = json.dumps({'pi': {'hide_thinking_block': value}}).encode()
+            self.assertIs(config.parse(raw)['pi']['hide_thinking_block'], value)
+        for value in (None, 1, 'true'):
+            with self.subTest(value=value), self.assertRaises(config.ConfigError):
+                config.parse(json.dumps({'pi': {'hide_thinking_block': value}}).encode())
+
     def test_codex_model_preferences_are_explicit_optional_strings(self):
         base = {'approval_policy': 'on-request', 'sandbox_mode': 'workspace-write'}
         for extra in ({}, {'model': 'fixture-model'}, {'model_reasoning_effort': 'high'},

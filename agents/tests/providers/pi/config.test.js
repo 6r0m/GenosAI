@@ -66,15 +66,55 @@ function scopedFixture(t) {
  settingsStub(pkg);
  fs.writeFileSync(cli,"if(process.env.PI_TEST_LOCAL_INSTALL_FAIL || (process.argv[2]==='remove' && process.env.PI_TEST_LOCAL_REMOVE_FAIL))process.exit(7);const fs=require('fs'),path=require('path'),dir=process.env.PI_CODING_AGENT_DIR,file=path.join(dir,'settings.json'),data=fs.existsSync(file)?JSON.parse(fs.readFileSync(file)):{};data.packages=(data.packages??[]).filter(x=>x!==process.argv[3]);if(process.argv[2]==='install')data.packages.push(process.argv[3]);fs.writeFileSync(file,JSON.stringify(data));");
  const catalog=path.join(prefix,'node_modules/@earendil-works/pi-ai/dist/providers/data');fs.mkdirSync(catalog,{recursive:true});
- for(const provider of ['deepseek','other'])fs.writeFileSync(path.join(catalog,provider+'.json'),JSON.stringify({models:{a:{id:'a',api:'openai-completions'},b:{id:'b',api:'openai-completions'}}}));
+ for(const provider of ['deepseek','other'])fs.writeFileSync(path.join(catalog,provider+'.json'),JSON.stringify({models:{a:{id:'a',api:'openai-completions'},b:{id:'b',api:'openai-completions'},flash:{id:'deepseek-flash',api:'openai-completions',contextWindow:1048577}}}));
  return {...o,cli,profileScope:true};
 }
 const retryPolicy={enabled:true,maxRetries:5,baseDelayMs:60000,maxAgentDelayMs:900000};
+test('DeepSeek Flash compaction manages only its calculated reserve',async t=>{
+ const o=scopedFixture(t),{agentDir:dir}=await configure(o);
+ const key='deepseek/deepseek-flash',file=path.join(dir,'settings.json');
+ const settings=read({dir},'settings.json');
+ settings.compaction={reserveTokens:17000,keepRecentTokens:18000,modelOverrides:{
+  [key]:{keepRecentTokens:19000},'other/deepseek-flash':{reserveTokens:24000},
+ }};
+ fs.writeFileSync(file,JSON.stringify(settings));
+ const initial=fs.readFileSync(file,'utf8');
+ await configure({...o,profiles:one('other','deepseek-flash')});
+ assert.equal(fs.readFileSync(file,'utf8'),initial);
+ const flash={...o,profiles:one('deepseek','deepseek-flash')};
+ await configure(flash);
+ settings.compaction.modelOverrides[key].reserveTokens=314574;
+ assert.deepEqual(read({dir},'settings.json'),settings);
+ assert.equal(read({dir},'agents-sot-state.json').flashCompactionReserve,314574);
+ const applied=fs.readFileSync(file,'utf8');
+ await configure(flash);
+ assert.equal(fs.readFileSync(file,'utf8'),applied);
+ settings.compaction.modelOverrides[key].reserveTokens=250000;
+ fs.writeFileSync(file,JSON.stringify(settings));
+ const conflicting=snapshotTree(dir);
+ await assert.rejects(configure(flash),/compaction.*reserveTokens conflicts/);
+ assert.deepEqual(snapshotTree(dir),conflicting);
+});
 test('scoped retry policy is projected after package registration and records field ownership',async t=>{
  const o=scopedFixture(t),{agentDir:dir}=await configure(o);
  assert.deepEqual(read({dir},'settings.json').retry,retryPolicy);
  assert.equal(read({dir},'settings.json').packages.length,1);
  assert.deepEqual(read({dir},'agents-sot-state.json').retryPolicy,retryPolicy);
+});
+test('installed Pi loads the wrapper thinking display default and retains a saved override', {skip:!process.env.PI_TEST_NATIVE_CLI},async t=>{
+ const o={...fixture(t),cli:process.env.PI_TEST_NATIVE_CLI,expected:'1.5.2',profileScope:true,profiles:one('deepseek','deepseek-flash')};
+ const {agentDir:dir}=await configure(o),pkg=path.resolve(path.dirname(o.cli),'../..');
+ const {SettingsManager}=await import(pathToFileURL(path.join(pkg,'dist/core/settings-manager.js')).href);
+ assert.equal(SettingsManager.create(o.root,dir).getHideThinkingBlock(),false);
+ await configure({...o,hideThinkingBlock:true});
+ const settings=SettingsManager.create(o.root,dir);
+ assert.equal(settings.getHideThinkingBlock(),true);
+ settings.setHideThinkingBlock(false);
+ await settings.flush();
+ const file=path.join(dir,'settings.json'),before=fs.readFileSync(file,'utf8');
+ await configure({...o,hideThinkingBlock:true});
+ assert.equal(SettingsManager.create(o.root,dir).getHideThinkingBlock(),false);
+ assert.equal(fs.readFileSync(file,'utf8'),before);
 });
 test('scoped retry accepts the fifteen-minute cap and updates the earlier managed policy',async t=>{
  const o=scopedFixture(t),file=path.join(o.root,'previous-policy.json');
@@ -179,6 +219,15 @@ test('installed Pi retry settings use the native lock, load normally and preserv
  const {SettingsManager}=await import(moduleUrl);
  assert.deepEqual(SettingsManager.create(o.root,dir).getRetrySettings(),retryPolicy);
  assert.equal(SettingsManager.create(o.root,dir).getProviderRetrySettings().maxRetries,undefined);
+ const flash=read({dir},'models.json').providers.deepseek.models[0];
+ const model={...flash,provider:'deepseek'};
+ const settings=SettingsManager.create(o.root,dir);
+ const compaction=settings.getCompactionSettings(model);
+ const {shouldCompact}=await import(pathToFileURL(path.join(pkg,'dist/core/compaction/compaction.js')).href);
+ const threshold=flash.contextWindow-Math.ceil(flash.contextWindow*0.30);
+ assert.equal(shouldCompact(threshold,flash.contextWindow,compaction),false);
+ assert.equal(shouldCompact(threshold+1,flash.contextWindow,compaction),true);
+ assert.equal(compaction.keepRecentTokens,settings.getCompactionSettings().keepRecentTokens);
  const policyFile=path.join(o.root,'policy.json'),next={...retryPolicy,baseDelayMs:5000};fs.writeFileSync(policyFile,JSON.stringify(next));
  const helper=path.join(o.root,'native-writer.mjs'),ready=path.join(o.root,'writer-ready');
  fs.writeFileSync(helper,`import fs from 'node:fs';import {FileSettingsStorage} from ${JSON.stringify(moduleUrl)};
@@ -542,7 +591,7 @@ test('SOT-only changes select native managed launch on each platform',t=>{
   const target=path.join(repo,'ai/agents',relative);fs.mkdirSync(path.dirname(target),{recursive:true});
   fs.copyFileSync(fileURLToPath(new URL('../../../'+relative,import.meta.url)),target);
  }
- fs.writeFileSync(path.join(repo,'ai/config.local.json'),JSON.stringify({pi:{secret_root:path.join(repo,'secrets'),ownership_root:repo}}));
+ fs.writeFileSync(path.join(repo,'ai/config.local.json'),JSON.stringify({pi:{secret_root:path.join(repo,'secrets'),ownership_root:repo,hide_thinking_block:true}}));
 
  const configFile=path.join(lifecycle,'providers.conf.sh');
  const home=path.join(repo,'home');fs.mkdirSync(home);
@@ -572,7 +621,7 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  const packageFile=path.join(packageDir,'package.json');
  fs.writeFileSync(packageFile,JSON.stringify({name:'@earendil-works/pi-coding-agent',version:pin}));
  fs.writeFileSync(path.join(capability,'index.js'),"export function getSupportedThinkingLevels(){return ['off','low','high','max'];}\n");
- fs.writeFileSync(path.join(capability,'providers/data/deepseek.json'),JSON.stringify({models:{flash:{id:'deepseek-flash',api:'openai-completions'},other:{id:'other-model',api:'openai-completions'}}}));
+ fs.writeFileSync(path.join(capability,'providers/data/deepseek.json'),JSON.stringify({models:{flash:{id:'deepseek-flash',api:'openai-completions',contextWindow:1000000},other:{id:'other-model',api:'openai-completions'}}}));
  if(!win){const node=path.join(home,'.nvm/versions/node/v24.8.0/bin/node');fs.mkdirSync(path.dirname(node),{recursive:true});fs.symlinkSync(process.execPath,node);}
  fs.writeFileSync(path.join(repo,'secrets/deepseek-pi.key'),'synthetic');
  const profileFile=path.join(runtime,'profiles.json'),first={provider:'deepseek',model:'deepseek-flash',credential:'secrets/deepseek-pi.key',thinking:'max'};
@@ -595,6 +644,10 @@ test('SOT-only changes select native managed launch on each platform',t=>{
  }
  const retryFile=path.join(runtime,'retry-policy.json'),retrySource=fs.readFileSync(retryFile,'utf8');
  const firstDir=path.join(home,'.pi/agent/profiles/deepseek-direct'),alternateDir=path.join(home,'.pi/agent/profiles/alternate');
+ assert.equal(read({dir:firstDir},'settings.json').hideThinkingBlock,true);
+ assert.equal(read({dir:alternateDir},'settings.json').hideThinkingBlock,true);
+ assert.deepEqual(read({dir:firstDir},'settings.json').compaction,{modelOverrides:{'deepseek/deepseek-flash':{reserveTokens:300000}}});
+ assert.equal(read({dir:alternateDir},'settings.json').compaction,undefined);
  const firstSnapshot=snapshotTree(firstDir),alternateSettings=path.join(alternateDir,'settings.json');
  fs.writeFileSync(retryFile,JSON.stringify({...retryPolicy,baseDelayMs:5000}));
  const alternateBefore=snapshotTree(alternateDir);

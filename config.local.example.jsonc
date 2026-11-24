@@ -86,6 +86,8 @@
     // Optional profile fields: thinking, endpoint, api, compatibleModel.
     // See agents/providers/pi/runtime/README.md for catalog/compatibility rules.
     // Add multiple profiles under profiles; only the selected credential is needed.
+    // Default thinking display for profiles without a saved preference:
+    // , "hide_thinking_block": true
     //
     // Credentials default to this checkout's secrets/ directory. To keep files
     // elsewhere: , "secret_root": "/srv/private-agent-keys"

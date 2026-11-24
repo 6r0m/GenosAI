@@ -14,6 +14,7 @@ install/remove and managed launch disable Pi telemetry explicitly.
 
 - Change a Pi connection
 - Native and compatible models
+- DeepSeek Flash compaction
 - Repository retry policy
 - Pinned runtime
 - Verify
@@ -104,6 +105,9 @@ The runtime is installed once. A first profile launch registers the common local
 canonical instructions; later launches verify ownership. File-link permissions must be available on
 Windows; an unavailable canonical link refuses before native dispatch.
 Native preferences are profile-local; base preferences and foreign packages are not copied.
+Set `"hide_thinking_block": true` in the private root `pi` object to collapse thinking blocks in
+managed profiles. The wrapper writes this default when a selected profile has no saved display
+preference. Pi saves changes made with Ctrl+T per profile. This setting controls transcript display.
 Pi also caches downloaded `fd` and `rg` executables in each profile's native `bin/` directory.
 Managed launches, reapplication and uninstall/reinstall preserve these caches. A profile or
 platform without a cached tool or a matching executable on `PATH` can download its own copy;
@@ -172,6 +176,17 @@ establish actual billing. The provider's billing remains authoritative.
 
 Native catalog definitions supply their model limits and pricing. Bounded transport checks do not
 establish full-window acceptance or service billing.
+
+## DeepSeek Flash compaction
+
+For a managed `deepseek/deepseek-flash` profile, [configure.js](configure.js) reserves 30% of the
+pinned model's context window, rounded up. Pi can start automatic compaction when its estimated
+usage exceeds the remaining 70%, using its existing summarization and retention settings.
+
+The wrapper owns only that model's `reserveTokens` field in the profile's native settings. A
+conflicting value refuses projection. The profile retains the model-specific reserve and ownership
+record through reconfiguration or removal. A project can override the same model field through
+Pi's native project settings.
 
 ## Repository retry policy
 

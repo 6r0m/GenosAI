@@ -34,6 +34,7 @@ const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const object = value => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const quote = s => "'" + s.replaceAll("'", "'\\''") + "'";
 const RETRY_KEYS = ['enabled','maxRetries','baseDelayMs','maxAgentDelayMs'];
+const DEEPSEEK_FLASH = 'deepseek/deepseek-flash';
 function validateRetryPolicy(policy) {
   if(!object(policy) || Object.keys(policy).length!==RETRY_KEYS.length || RETRY_KEYS.some(key=>!Object.hasOwn(policy,key)))throw Error('retry policy requires exactly: '+RETRY_KEYS.join(', '));
   if(typeof policy.enabled!=='boolean')throw Error('retry policy enabled must be boolean');
@@ -62,23 +63,45 @@ function checkRetryPolicy(settings, previous, desired) {
     throw Error('managed retry.'+key+' conflicts with native settings; restore the last-applied value or set it to retry-policy.json before retrying');
   }
 }
-async function retryStorage(cli, dir) {
-  if(!cli)throw Error('native Pi required for retry policy reconciliation');
+function checkFlashCompactionReserve(settings, previous, desired) {
+  if(desired===undefined)return;
+  if(previous!==undefined && (!Number.isSafeInteger(previous) || previous<1))throw Error('invalid managed Flash compaction reserve');
+  const compaction=settings.compaction;
+  const overrides=compaction?.modelOverrides;
+  const flash=overrides?.[DEEPSEEK_FLASH];
+  if([compaction,overrides,flash].some(value=>value!==undefined && !object(value)))
+    throw Error('native compaction and its model overrides must be objects');
+  if(flash?.reserveTokens!==desired && flash?.reserveTokens!==previous)
+    throw Error('compaction.modelOverrides["'+DEEPSEEK_FLASH+'"].reserveTokens conflicts with the managed policy; restore the last-applied value or set the requested reserve of '+desired);
+  return flash;
+}
+async function nativeSettingsStorage(cli, dir) {
+  if(!cli)throw Error('native Pi required for profile settings reconciliation');
   const file=path.resolve(path.dirname(cli),'../core/settings-manager.js');
   const {FileSettingsStorage}=await import(pathToFileURL(file).href);
   if(typeof FileSettingsStorage!=='function' || typeof FileSettingsStorage.prototype.withLock!=='function')throw Error('native Pi settings storage unavailable');
   return new FileSettingsStorage(dir,dir);
 }
-function applyRetryPolicy(storage, dir, previous, desired) {
+function applyProfileSettings(storage, dir, previous, {retryPolicy,flashCompactionReserve}, hideThinkingBlock) {
   // Package registration creates settings first: Pi's storage locks before reading existing files.
   const file=path.join(dir,'settings.json'),info=stat(file);
   if(!info?.isFile() || info.isSymbolicLink())throw Error('native settings must be an ordinary file after package registration');
   storage.withLock('global',text=>{
     if(text===undefined)throw Error('native settings disappeared after package registration');
     const settings=retrySettings(text);
-    checkRetryPolicy(settings,previous,desired);
-    if(RETRY_KEYS.every(key=>equal(settings.retry?.[key],desired[key])))return undefined;
-    settings.retry={...settings.retry,...desired};
+    checkRetryPolicy(settings,previous.retryPolicy,retryPolicy);
+    const flash=checkFlashCompactionReserve(settings,previous.flashCompactionReserve,flashCompactionReserve);
+    const retryChanged=RETRY_KEYS.some(key=>!equal(settings.retry?.[key],retryPolicy[key]));
+    const compactionChanged=flashCompactionReserve!==undefined && flash?.reserveTokens!==flashCompactionReserve;
+    const seedThinkingDisplay=hideThinkingBlock!==undefined && !Object.hasOwn(settings,'hideThinkingBlock');
+    if(!retryChanged && !compactionChanged && !seedThinkingDisplay)return undefined;
+    if(retryChanged)settings.retry={...settings.retry,...retryPolicy};
+    if(compactionChanged) {
+      const compaction=settings.compaction??={};
+      const overrides=compaction.modelOverrides??={};
+      (overrides[DEEPSEEK_FLASH]??={}).reserveTokens=flashCompactionReserve;
+    }
+    if(seedThinkingDisplay)settings.hideThinkingBlock=hideThinkingBlock;
     return JSON.stringify(settings,null,2)+'\n';
   });
 }
@@ -245,7 +268,7 @@ export async function configure(options) {
   if(options.profileScope)return configureProfile(options);
   return project(options);
 }
-async function project({op, dir, root, secretRoot = path.join(root, "secrets"), profiles, profileFile, requireKey = true, cli, expected, profileId, setup = false, resources, dryRun=false, engineBase, retryPolicyFile}) {
+async function project({op, dir, root, secretRoot = path.join(root, "secrets"), profiles, profileFile, requireKey = true, cli, expected, profileId, setup = false, resources, dryRun=false, engineBase, retryPolicyFile, hideThinkingBlock}) {
   root = path.resolve(root);dir = path.resolve(dir);
   secretRoot=path.resolve(secretRoot);
   const credentialPath = reference => {
@@ -282,6 +305,12 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
   const selectedProfile = chosen?.profiles[chosen.active];
   const plugins = selectedProfile ? selectPlugins(chosen.plugins, selectedProfile.plugins) : {};
   const retryPolicy=resources && chosen && op!=='uninstall' ? readRetryPolicy(retryPolicyFile) : undefined;
+  let flashCompactionReserve;
+  if(resources && cli && selectedProfile && `${selectedProfile.provider}/${selectedProfile.model}`===DEEPSEEK_FLASH) {
+    const contextWindow=catalogModel?.contextWindow;
+    if(!Number.isSafeInteger(contextWindow) || contextWindow<1)throw Error('invalid pinned context window for '+DEEPSEEK_FLASH);
+    flashCompactionReserve=Math.ceil(contextWindow*0.30);
+  }
   const launch = catalogModel
     ? pluginLaunch(plugins, {...catalogModel, baseUrl:selectedProfile.endpoint || catalogModel.baseUrl,
       provider:selectedProfile.provider}, chosen.active,undefined,
@@ -311,7 +340,10 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
     if(resources) {
       const settings=resourceCheck(dir,resources,state);
       if(retryPolicy)checkRetryPolicy(settings,state.retryPolicy,retryPolicy);
+      checkFlashCompactionReserve(settings,state.flashCompactionReserve,flashCompactionReserve);
     }
+    const previousPolicies={retryPolicy:state.retryPolicy,flashCompactionReserve:state.flashCompactionReserve};
+    const nextPolicies={retryPolicy:retryPolicy??state.retryPolicy,flashCompactionReserve:flashCompactionReserve??state.flashCompactionReserve};
     const old = state.managed ?? {};
     if(op !== 'uninstall' && !chosen) {
       if(Object.values(old).some(entries => Object.keys(entries).length))throw Error('existing managed connection requires a configured profile; refusing to clear it during setup');
@@ -349,14 +381,14 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
     }
     if(op === 'validate' || dryRun)return chosen ? {profile: chosen.active, provider: chosen.profiles[chosen.active].provider, model: chosen.profiles[chosen.active].model, thinking: chosen.profiles[chosen.active].thinking, plugins, launch} : {};
     if(resources && op!=='uninstall') {
-      const storage=await retryStorage(cli,dir);
+      const storage=await nativeSettingsStorage(cli,dir);
       // Record partial provisioning ownership so a failed local package install can be retried.
-      const partial={root,profile:chosen.active,managed:old,resources,...(state.retryPolicy?{retryPolicy:state.retryPolicy}:{})};
+      const partial={root,profile:chosen.active,managed:old,resources,...previousPolicies};
       atomic(statePath,partial);
       provision(dir,resources,cli);
-      applyRetryPolicy(storage,dir,state.retryPolicy,retryPolicy);
-      // Finalize retry ownership before introducing connection projections on a fresh profile.
-      if(!equal(state.retryPolicy,retryPolicy))atomic(statePath,{...partial,retryPolicy});
+      applyProfileSettings(storage,dir,previousPolicies,{retryPolicy,flashCompactionReserve},hideThinkingBlock);
+      // Finalize settings ownership before introducing connection projections on a fresh profile.
+      if(!equal(previousPolicies,nextPolicies))atomic(statePath,{...partial,...nextPolicies});
     }
     // Failed native removal must leave the recorded connection projections available for retry.
     if(resources && op==='uninstall')removeResources(dir,resources,cli);
@@ -367,11 +399,11 @@ async function project({op, dir, root, secretRoot = path.join(root, "secrets"), 
       if(!equal(models, read(modelsPath)))atomic(modelsPath, models);
     }
     if(op === 'uninstall') {
-      if(resources)atomic(statePath,{root,profile:state.profile,managed:{},resources,...(state.retryPolicy?{retryPolicy:state.retryPolicy}:{})});
+      if(resources)atomic(statePath,{root,profile:state.profile,managed:{},resources,...nextPolicies});
       else if(fs.existsSync(statePath))fs.unlinkSync(statePath);
       return {profile: null, provider: null, model: null, thinking: null};
     }
-    atomic(statePath, {root, profile: chosen.active, managed,...(resources?{resources,retryPolicy}:{})});
+    atomic(statePath, {root, profile: chosen.active, managed,...(resources?{resources,...nextPolicies}:{})});
     return {profile: chosen.active, provider: chosen.profiles[chosen.active].provider, model: chosen.profiles[chosen.active].model, thinking: chosen.profiles[chosen.active].thinking, plugins, launch};
   } finally {if(op !== 'validate' && !dryRun)fs.rmdirSync(lock);}
 }
@@ -440,6 +472,7 @@ if(process.argv[1] === new URL(import.meta.url).pathname || process.argv[1]?.rep
   try {
     const input=localMode ? JSON.parse(fs.readFileSync(0,'utf8')) : {};
     if(localMode && (typeof input.root!=='string' || typeof input.secretRoot!=='string' || typeof input.configured!=='boolean'))throw Error('local configuration reader unavailable');
+    if(input.hideThinkingBlock!==undefined && typeof input.hideThinkingBlock!=='boolean')throw Error('hideThinkingBlock must be boolean');
     if(op==='schema') {resolveProfiles(input.profiles, setup);readRetryPolicy();process.exit(0);}
     if(op==='acquire-plugins') {
       const config = resolveProfiles(input.profiles,true);
@@ -457,7 +490,7 @@ if(process.argv[1] === new URL(import.meta.url).pathname || process.argv[1]?.rep
       await checkNativeArgs(cli,nativeArgs);
     }
     const result = await configure({op: op === 'resolve' ? 'validate' : op==='launch' ? 'install' : op, dir, root, cli, expected, profileId, setup,profileScope:true,
-      ...(localMode ? {root:input.root,secretRoot:input.secretRoot,profiles:input.profiles} : {}), requireKey: op !== 'uninstall'});
+      ...(localMode ? {root:input.root,secretRoot:input.secretRoot,profiles:input.profiles,hideThinkingBlock:input.hideThinkingBlock} : {}), requireKey: op !== 'uninstall'});
     // Selection is returned from the same snapshot that was validated, and projected for install.
     if(op==='launch') {
       process.stdout.write([result.provider,result.model,result.agentDir,result.thinking||'-',
