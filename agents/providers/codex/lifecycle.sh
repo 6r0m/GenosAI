@@ -1,5 +1,5 @@
 codex() {
-  local id="$1" platform="$2" home="$3" task_codex native_home native_cwd=/ probe shell_home shell_codex account
+  local id="$1" platform="$2" home="$3" task_codex native_home native_cwd=/ probe shell_home shell_codex shell_path runtime_path= writer_path account
   generic "$id" "$platform" "$home"
   if [[ "$operation" == uninstall ]]; then
     printf 'kept    %s (Codex settings are left in place on uninstall)\n' "$home/${PROVIDER_DIR[$id]}/config.toml"
@@ -13,11 +13,16 @@ codex() {
         # A bash launched from Windows starts WSL without the login profile. Ask the
         # account login shell once, but only accept a runtime resolved while that
         # shell keeps the selected home: a profile that switches HOME must not
-        # select another account's executable.
-        probe="$(timeout 20 bash -lc 'printf "home:%s\n" "$HOME"; printf "codex:%s\n" "$(type -P codex || true)"' 2>/dev/null || true)"
+        # select another account's executable. Its PATH travels with the runtime so
+        # an npm shim can still find the interpreter that lives outside this PATH.
+        probe="$(timeout 20 bash -lc 'printf "home:%s\n" "$HOME"; printf "codex:%s\n" "$(type -P codex || true)"; printf "path:%s\n" "$PATH"' 2>/dev/null || true)"
         shell_home="$(printf '%s\n' "$probe" | sed -n 's/^home://p' | tail -n 1)"
         shell_codex="$(printf '%s\n' "$probe" | sed -n 's/^codex://p' | tail -n 1)"
-        if [[ "${shell_home%/}" == "${HOME%/}" ]]; then task_codex="$shell_codex"; fi
+        shell_path="$(printf '%s\n' "$probe" | sed -n 's/^path://p' | tail -n 1)"
+        if [[ "${shell_home%/}" == "${HOME%/}" ]]; then
+          task_codex="$shell_codex"
+          runtime_path="$shell_path"
+        fi
         [[ ! -f "$task_codex" ]] || printf 'ok      %s (Codex runtime from the login shell)\n' "$task_codex"
       fi
     fi
@@ -38,6 +43,11 @@ codex() {
     FAILED=1
     return
   fi
-  python3 "$AI_ROOT/providers/codex/settings.py" apply "$home/${PROVIDER_DIR[$id]}" \
+  # Apply the login environment only to this writer invocation: the runtime may be an
+  # npm shim whose interpreter exists only on the login PATH. The parent environment
+  # and the Windows pass keep the installer PATH.
+  writer_path="$PATH"
+  [[ -z "$runtime_path" ]] || writer_path="$runtime_path${PATH:+:$PATH}"
+  PATH="$writer_path" python3 "$AI_ROOT/providers/codex/settings.py" apply "$home/${PROVIDER_DIR[$id]}" \
     --codex "$task_codex" --native-home "$native_home" || { FAILED=1; return; }
 }

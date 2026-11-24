@@ -236,6 +236,74 @@ exit "$FAILED"
             self.assertNotIn("resolved:", alternate.stdout)
             self.assertFalse(marker.exists(), "an alternate home must not run login initialization")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "executable fixture needs a POSIX temporary tree")
+    def test_login_shell_path_reaches_the_wsl_settings_writer(self):
+        with tempfile.TemporaryDirectory(prefix="codex-login-path-", dir="/tmp") as temporary:
+            root = Path(temporary)
+            home = root / "home"; home.mkdir()
+            empty = root / "empty"; empty.mkdir()
+            login_bin = root / "login-bin"; login_bin.mkdir()
+            node = login_bin / "node"
+            node.write_text("#!/bin/sh\nprintf 'node-ran\\n'\n")
+            node.chmod(0o755)
+            runtime = login_bin / "codex"
+            runtime.write_text("#!/usr/bin/env node\n// synthetic npm shim\n")
+            runtime.chmod(0o755)
+            (home / ".profile").write_text('export PATH="' + str(login_bin) + ':/usr/bin:/bin"\n')
+            script = r'''
+source "$1"
+account_home() { printf '%s\n' "$HOME"; }
+declare -A PROVIDER_DIR=([codex]=.codex)
+operation=install
+AI_ROOT=fixture
+FAILED=0
+generic() { :; }
+python3() { "$5" app-server; }
+codex codex wsl "$2"
+exit "$FAILED"
+'''
+            lifecycle = str(Path(ST.AGENTS) / "providers/codex/lifecycle.sh")
+            env = dict(os.environ, HOME=str(home), PATH="/usr/bin:/bin")
+
+            # Known-bad control: this shim cannot run without the login PATH.
+            control = subprocess.run([str(runtime), "app-server"],
+                                     env=dict(os.environ, PATH=str(empty)),
+                                     capture_output=True, text=True, timeout=30)
+            self.assertNotEqual(control.returncode, 0, "the shim ran without the login PATH")
+
+            result = subprocess.run(["bash", "-c", script, "fixture", lifecycle, str(home)],
+                                    env=env, capture_output=True, text=True, timeout=60)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("node-ran", result.stdout, "the writer did not receive the login PATH")
+            self.assertIn("Codex runtime from the login shell", result.stdout)
+
+    def test_windows_pass_does_not_depend_on_wsl_discovery_state(self):
+        with tempfile.TemporaryDirectory(dir=Path(ST.REPO) / "tmp") as temporary:
+            runtime = Path(temporary) / "codex.exe"
+            runtime.touch()
+            script = r'''
+set -euo pipefail
+source "$1"
+declare -A PROVIDER_DIR=([codex]=.codex)
+operation=install
+AI_ROOT=fixture
+FAILED=0
+generic() { :; }
+cmd.exe() { printf 'C:/tools/codex.exe\n'; }
+wslpath() { case "$1" in -u) printf '%s\n' "${FAKE_CODEX}" ;; -w) printf 'C:/selected-home\n' ;; esac; }
+python3() { printf 'writer:%s\n' "$5"; }
+codex codex windows "$2"
+exit "$FAILED"
+'''
+            result = subprocess.run(
+                ["bash", "-c", script, "fixture",
+                 str(Path(ST.AGENTS) / "providers/codex/lifecycle.sh"), temporary],
+                env=dict(os.environ, FAKE_CODEX=str(runtime)),
+                capture_output=True, text=True, timeout=30)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn("unbound variable", result.stderr)
+            self.assertIn("writer:" + str(runtime), result.stdout)
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "WSL lifecycle shell")
     def test_windows_discovery_skips_extensionless_npm_launcher(self):
         with tempfile.TemporaryDirectory(dir=Path(ST.REPO) / "tmp") as temporary:
