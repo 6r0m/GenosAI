@@ -13,6 +13,22 @@ BASH = shutil.which("bash")
 
 
 @unittest.skipUnless(BASH, "requires Bash")
+class HostFamily(unittest.TestCase):
+    def test_only_native_windows_bash_is_refused(self):
+        script = 'uname() { printf "%s\\n" "$FIXTURE_UNAME"; }; source "$1"; host_family'
+        for value, expected in (("Linux", "posix"), ("Darwin", "posix"),
+                                ("MINGW64_NT-10.0", "windows-bash"),
+                                ("MSYS_NT-10.0", "windows-bash"),
+                                ("CYGWIN_NT-10.0", "windows-bash")):
+            with self.subTest(uname=value):
+                result = subprocess.run([BASH, "-c", script, "fixture", HELPER.as_posix()],
+                                        env=dict(os.environ, FIXTURE_UNAME=value),
+                                        capture_output=True, text=True, timeout=20)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
+
+
+@unittest.skipUnless(BASH, "requires Bash")
 class WindowsProfile(unittest.TestCase):
     def profile(self, value, code="0"):
         env = dict(os.environ, FIXTURE_PROFILE=value, FIXTURE_EXIT=code)

@@ -12,6 +12,10 @@ source "$SCRIPT_DIR/registry.sh"
 load_registry || { echo 'error: invalid provider/profile configuration' >&2; exit 1; }
 source "$SCRIPT_DIR/platform-links.sh"
 source "$SCRIPT_DIR/platform-paths.sh"
+if [[ "$(host_family)" == windows-bash ]]; then
+  echo 'error: run the installer from WSL or Linux, not native Windows Bash; from Windows run it through wsl.exe' >&2
+  exit 1
+fi
 operation="${1-}"; shift
 [[ "$operation" == install || "$operation" == uninstall ]] || exit 1
 selected='shared'; runtime=0; approve=''; platforms=host

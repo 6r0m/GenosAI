@@ -1,4 +1,13 @@
 # Native Windows profile discovery shared by lifecycle and permission checks.
+# The installer host needs POSIX home and link semantics; native Windows Bash cannot
+# reach the native link or WSL path owners below.
+host_family() {
+  case "$(uname -s 2>/dev/null || true)" in
+    MINGW*|MSYS*|CYGWIN*) printf 'windows-bash\n' ;;
+    *) printf 'posix\n' ;;
+  esac
+}
+
 windows_profile() {
   local profile cwd=/
   [[ ! -d /mnt/c ]] || cwd=/mnt/c

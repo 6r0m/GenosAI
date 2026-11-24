@@ -23,7 +23,9 @@ bash agents/scripts/install.sh --provider codex
 ```
 
 The selected install targets the current Linux/WSL host; add `--platform both` for native Windows too. It requires each platform's Codex
-executable or npm command shim on its own PATH. Windows discovery selects `.exe`, `.cmd` or `.bat`
+executable or npm command shim on its own PATH. A `bash` launched from Windows starts WSL without reading the login profile, so a Codex
+installed under a user npm prefix is not on that PATH; WSL discovery then asks the login shell once and uses the runtime it finds. A
+runtime that neither PATH exposes is reported as a partial failure. Windows discovery selects `.exe`, `.cmd` or `.bat`
 entries and skips npm's extensionless Unix launcher. Command shims run through the native command
 interpreter, with the selected Windows `CODEX_HOME` propagated across WSL interop.
 Missing runtimes and refused settings are reported as partial failures; the independent instruction

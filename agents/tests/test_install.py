@@ -130,6 +130,23 @@ class InstallerWiring(unittest.TestCase):
     def errors(self, proc):
         return [l for l in (proc.stdout + proc.stderr).splitlines() if l.startswith("error")]
 
+    def test_native_windows_bash_refuses_before_any_change(self):
+        if type(self) is not InstallerWiring:
+            self.skipTest('host refusal is platform-generic')
+        shim = os.path.join(self.tmp, "fake-uname.sh")
+        with open(shim, "w", encoding="utf-8") as fh:
+            fh.write('uname() { printf "MINGW64_NT-10.0\\n"; }\n')
+        before = _snapshot(self.home)
+        proc = subprocess.run(
+            ["bash", os.path.join(self.copy, "scripts", "install.sh"),
+             "--provider", "codex", "--platform", "both"],
+            env={"HOME": self.home, "PATH": SAFE_PATH, "TMPDIR": self.tmp, "BASH_ENV": shim},
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertIn("not native Windows Bash", proc.stderr)
+        self.assertEqual(before, _snapshot(self.home), "a refused host must not change the home")
+
     def test_codex_route_links_only_real_skills_and_shared(self):
         os.symlink(self.skills, os.path.join(self.home, ".agents", "skills"))
         before = _snapshot(self.copy)

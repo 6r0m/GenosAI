@@ -186,6 +186,45 @@ class CodexSettings(unittest.TestCase):
         self.assertIn("CODEX_HOME", env["WSLENV"].split(":"))
         self.assertEqual(popen.call_args.kwargs["cwd"], "/mnt/c")
 
+    def test_wsl_discovery_falls_back_to_the_login_shell(self):
+        with tempfile.TemporaryDirectory(dir=Path(ST.REPO) / "tmp") as temporary:
+            runtime = Path(temporary) / "codex"
+            runtime.touch()
+            script = r'''
+source "$1"
+declare -A PROVIDER_DIR=([codex]=.codex)
+operation=install
+AI_ROOT=fixture
+FAILED=0
+generic() { :; }
+type() { return 1; }
+timeout() { shift; "$@"; }
+bash() { [[ -n "${FAKE_CODEX-}" ]] && printf '%s\n' "$FAKE_CODEX"; }
+python3() { printf 'resolved:%s\n' "$5"; }
+codex codex wsl "$2"
+exit "$FAILED"
+'''
+            lifecycle = str(Path(ST.AGENTS) / "providers/codex/lifecycle.sh")
+
+            def probe(found):
+                env = dict(os.environ)
+                if found:
+                    env["FAKE_CODEX"] = str(runtime)
+                else:
+                    env.pop("FAKE_CODEX", None)
+                return subprocess.run(["bash", "-c", script, "fixture", lifecycle, temporary],
+                                      env=env, capture_output=True, text=True, timeout=30)
+
+            hit = probe(True)
+            self.assertEqual(hit.returncode, 0, hit.stdout + hit.stderr)
+            self.assertIn("resolved:" + str(runtime), hit.stdout)
+            self.assertIn("Codex runtime from the login shell", hit.stdout)
+
+            missed = probe(False)
+            self.assertEqual(missed.returncode, 1)
+            self.assertIn("PATH or in a login shell", missed.stderr)
+            self.assertNotIn("resolved:", missed.stdout)
+
     @unittest.skipUnless(sys.platform.startswith("linux"), "WSL lifecycle shell")
     def test_windows_discovery_skips_extensionless_npm_launcher(self):
         with tempfile.TemporaryDirectory(dir=Path(ST.REPO) / "tmp") as temporary:

@@ -75,7 +75,9 @@ No arguments selects shared instructions/search wiring on the current Linux/WSL 
 Choose a provider with `--provider claude|codex|pi`; `--provider all` explicitly requests every provider
 and installs Pi without requiring connection input. `--platform windows|both` opts into WSL-to-Windows discovery.
 An unavailable requested Windows profile is a failed/partial operation. Ordinary Linux setup does
-not call Windows tools. Native Windows Bash installation is not a claimed acceptance target.
+not call Windows tools. The installer host is WSL or Linux, including `make` launched from Windows
+through the WSL launcher; native Windows Bash (Git Bash, MSYS, Cygwin) refuses before changing
+anything.
 Pi installation requires a supported Node interpreter and npm for runtime acquisition. A private connection
 and readable credential are required only for model sessions; `pi-sot --version` and `--help` work without
 them. `--runtime` explicitly opts into dependency acquisition. Keep provider/runtime pins in the

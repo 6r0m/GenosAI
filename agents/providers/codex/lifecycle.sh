@@ -7,6 +7,12 @@ codex() {
   fi
   if [[ "$platform" == wsl ]]; then
     task_codex="$(type -P codex || true)"
+    if [[ -z "$task_codex" ]]; then
+      # A bash launched from Windows starts WSL without the login profile, so the
+      # runtime the operator uses is not on that PATH. Ask the login shell once.
+      task_codex="$(timeout 20 bash -lc 'type -P codex' 2>/dev/null | tail -n 1 || true)"
+      [[ ! -f "$task_codex" ]] || printf 'ok      %s (Codex runtime from the login shell)\n' "$task_codex"
+    fi
     native_home="$home/${PROVIDER_DIR[$id]}"
   else
     [[ ! -d /mnt/c ]] || native_cwd=/mnt/c
@@ -16,7 +22,11 @@ codex() {
     native_home="$(wslpath -w "$home/${PROVIDER_DIR[$id]}")"
   fi
   if [[ -z "$task_codex" || ! -f "$task_codex" ]]; then
-    printf 'warn: Codex settings skipped on %s: native runtime absent\n' "$platform" >&2
+    if [[ "$platform" == wsl ]]; then
+      printf 'warn: Codex settings skipped on wsl: Codex executable not found on PATH or in a login shell; add its directory to PATH and rerun\n' >&2
+    else
+      printf 'warn: Codex settings skipped on windows: Codex executable not found on the Windows PATH; repair PATH and rerun\n' >&2
+    fi
     FAILED=1
     return
   fi
