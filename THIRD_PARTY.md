@@ -7,7 +7,7 @@ The material below retains its own licenses and notices, which must accompany re
 | Material | Provenance owner | Bundled terms |
 |---|---|---|
 | JSONC parser | [json-with-comments 1.3.0, local patches](agents/vendor/jsonc/UPSTREAM.lock) | [MIT](agents/vendor/jsonc/LICENSE) |
-| Frontend design skill | [pinned upstream commit](agents/skills/frontend-design/UPSTREAM.lock) | [Apache-2.0](agents/skills/frontend-design/LICENSE.txt) |
+| Anthropic visual-direction reference | [Anthropic upstream pin](agents/skills/frontend-design/UPSTREAM.lock) | [Apache-2.0](agents/skills/frontend-design/references/vendor/anthropic/LICENSE.txt) |
 | Web interface guidelines reference | [pinned upstream commit](agents/skills/web-design-review/UPSTREAM.lock) | [MIT](agents/skills/web-design-review/references/vendor/web-interface-guidelines/LICENSE) |
 | Playwright CLI reference manual | [@playwright/cli 0.1.17](agents/skills/drive-browser/UPSTREAM.lock) | [Apache-2.0](agents/skills/drive-browser/references/playwright-cli/LICENSE) |
 

@@ -16,7 +16,9 @@ Identify the primary task, who performs it, and how they enter, complete, cancel
 - Decide which view owns each action and piece of information. Keep navigation and surrounding controls relevant to the current task.
 - Group fields by the decisions users make and their dependencies. Make the primary action and the information needed to take it easy to find. Give repeated facts a clear home and use comparable controls, terminology and status cues for equivalent actions.
 - Resolve applicable loading, empty, error, permission and long-content states. For windows and dialogs, decide where content scrolls, where actions remain reachable, how keyboard focus enters and returns, and how dismissal preserves task state.
-- Reuse the product's component families, typography, spacing, density and alignment. Where the brief calls for a new visual identity, consult the [pinned Anthropic visual-direction guide](references/vendor/anthropic/frontend-design.md) for composition, type, color and copy choices. Use a compact layout sketch when it helps resolve a material choice.
+- Reuse the product's component families, typography, spacing, density and alignment. Preserve its visual identity unless the task calls for changing it. Use a compact layout sketch when it helps resolve a material choice.
+
+When composition, typography, color, motion or visual polish materially affects the result, consult the [pinned Anthropic visual-direction guide](references/vendor/anthropic/frontend-design.md). Apply its relevant guidance within the brief and established product conventions.
 
 ## Inspect the result
 

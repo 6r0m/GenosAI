@@ -3,12 +3,14 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
 import sys
 import unittest
 from unittest import mock
+from urllib.parse import unquote, urlsplit
 import skilltree as ST
 
 AI=Path(__file__).resolve().parents[2]
@@ -26,6 +28,19 @@ class Distribution(unittest.TestCase):
         manifest=source/'tools/source-manifest.json'
         manifest.parent.mkdir(parents=True,exist_ok=True)
         manifest.write_text(json.dumps({'version':1,'files':sorted(['tools/source-manifest.json',*names])})+'\n')
+
+    def test_third_party_notice_links_to_distributed_files(self):
+        notice = ST.strip_code(ST.read(AI / 'THIRD_PARTY.md'))
+        distributed = {file.relative_to(AI).as_posix() for file in release.source_files(AI)}
+        targets = []
+        for target in re.findall(r'\]\(([^)\s]+)\)', notice):
+            link = urlsplit(target)
+            if link.path and not link.scheme and not link.netloc:
+                targets.append(Path(unquote(link.path)).as_posix())
+        self.assertTrue(targets, 'third-party notice must link to bundled files')
+        for target in targets:
+            with self.subTest(target=target):
+                self.assertTrue(target in distributed, 'notice target is absent from the distribution')
 
     @unittest.skipUnless(os.name=='posix','Unix executable permissions')
     def test_export_preserves_executable_hooks_without_setup_repair(self):

@@ -34,6 +34,10 @@ An agent handling a material UI change should understand the user's task, produc
   - Effect — Authorizes the in-scope review fixes in this round.
   - Reason — Not stated.
   - Date/source — 2026-11-25, operator review-and-fix request.
+- **D4** Evaluate the follow-up review against the repository, project goals and prior decisions, and apply valid code and documentation fixes.
+  - Effect — Authorizes the in-scope follow-up fixes.
+  - Reason — Not stated.
+  - Date/source — 2026-11-25, operator follow-up review-and-fix request.
 
 ### Operator gates
 
@@ -83,7 +87,7 @@ The existing frontend entry already owns UI design and has a portable invocation
 
 1. Each skill keeps one discoverable entrypoint and its existing invocation name. Detailed guidance loads conditionally. Specialist knowledge respects the task's authority.
 2. Product sources own navigation, interaction and styles. The technical audit keeps its read-only output and scope.
-3. The distribution includes the pinned reference and license. Provider projections retain their existing settings, link and foreign-state protections.
+3. The distribution includes the pinned reference and license. The third-party notice links to the distributed files. Provider projections retain their existing settings, link and foreign-state protections.
 4. Discovery, selection, application and rendered quality each require direct evidence at their own layer.
 
 ## Implementation tasks
@@ -105,7 +109,7 @@ Check the candidate's skill structure, reference and license bytes, public file 
 
 ## Documentation plan
 
-The frontend skill owns the method, the agents README routes to it, the upstream lock owns provenance, and the evaluation README owns the reusable quality and selection rubric.
+The frontend skill owns the method, the agents README routes to it, the upstream lock owns provenance, and the [third-party notice](../THIRD_PARTY.md) identifies the bundled terms. The evaluation README owns the reusable quality and selection rubric.
 
 ## Completion criteria
 
@@ -123,3 +127,9 @@ The offline contract passes and the paired evaluation demonstrates applicable se
 - `make check` and `make public-check` passed. An independent archive extraction passed the artifact privacy and configuration checks. The packaged guide and license match the baseline bytes. The skill authoring validator passed the frontend entrypoint. The web audit retains the documented Claude `argument-hint` extension.
 - Native Codex on Windows and WSL each exposed one enabled canonical entry per design skill and both revised descriptions in `debug prompt-input`, with zero discovery errors. The estimated frontend body fell from 2,269 to 615 tokens before any conditional read.
 - Extracted `make test` reported 302 passes, 9 skips and one failure. `test_windows_command_shim_with_spaces_empty_home_and_conflicting_policy` reported a nonzero Codex server shutdown. The same test failed on unchanged `f035778` when extracted to the WSL filesystem and passed when run natively on Windows.
+
+### 2026-11-25 — Follow-up review
+
+- D4 recorded. The third-party notice now identifies the Anthropic visual-direction reference and links to its shipped license. The release regression failed against the former license path before the notice was corrected.
+- The frontend skill now consults the visual-direction reference when visual decisions materially affect the result, including refinement within the incumbent visual identity. Comparative model evidence remains pending.
+- The notice regression passed after correction. An independently extracted distribution passed its artifact check, all 11 conformance tests and all 30 release tests. The vendored guide and license still match `f035778` byte-for-byte.
