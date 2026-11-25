@@ -68,6 +68,8 @@ Pi consumes the shared instructions and local package manifest; its provider own
 
 ## Skills
 
+[Skill improvement history](skill-improvements.md) records changes and observed effects.
+
 | skill | owns |
 |---|---|
 | [investigate-change](skills/investigate-change/SKILL.md) | producing one reviewable todo, never the change |

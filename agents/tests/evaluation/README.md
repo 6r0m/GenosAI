@@ -126,7 +126,7 @@ the worker's accessible inputs. The S5 runner bypasses native skill loading.
 | Case | Seeded defect | Score from the rendered interface |
 |---|---|---|
 | Navigation | Run-specific controls appear in a repository view | The controls belong to the run view, and reaching either task still works |
-| Settings | Schema-order fields, repeated status and mismatched controls for equivalent actions | Fields follow decision order, status has one clear home, and peers share component and visual conventions |
+| Settings | Schema-order fields, repeated status and mismatched controls for equivalent actions | Fields follow decision order, the owning view retains one copy of the existing status, and peers share component and visual conventions |
 | Compact dialog | Long content clips an action or creates competing vertical scroll areas | The action remains reachable, scroll ownership is clear, and keyboard focus and dismissal work at supported sizes |
 
 Before comparing responses, check that the fixture exhibits the seeded defects and that the rubric

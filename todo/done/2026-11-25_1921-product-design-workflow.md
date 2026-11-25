@@ -1,10 +1,10 @@
 # Product design and rendered acceptance
 
-**Status:** REVIEW REQUIRED
+**Status:** IMPLEMENTED — verified on native Codex and rendered fixtures
 
-**Scope:** GenosAI design-skill guidance and remaining fresh-agent verification
+**Scope:** GenosAI design-skill guidance and fresh-agent verification
 
-**Stable documentation owner:** [Frontend design skill](../agents/skills/frontend-design/SKILL.md)
+**Stable documentation owner:** [Frontend design skill](../../agents/skills/frontend-design/SKILL.md)
 
 ## Contents
 
@@ -38,10 +38,18 @@ An agent handling a material UI change should understand the user's task, produc
   - Effect — Authorizes the in-scope follow-up fixes.
   - Reason — Not stated.
   - Date/source — 2026-11-25, operator follow-up review-and-fix request.
+- **D5** Apply the temporary skill to the current repository if it performed better. Link a document on skill improvements and their effects from the README.
+  - Effect — Authorizes the tested entrypoint and its history when the comparison supports promotion.
+  - Reason — Not stated.
+  - Date/source — 2026-11-25, operator promotion request.
+- **D6** Complete the verification and fix demonstrated gaps before closing the design workflow todo. Verify consistency, layout and component reuse.
+  - Effect — Authorizes the remaining acceptance work and fixes within the design workflow.
+  - Reason — The layout and reuse goal should be solved.
+  - Date/source — 2026-11-25, operator completion request.
 
 ### Operator gates
 
-Live model evaluation requires separate authorization under the [evaluation contract](../agents/tests/evaluation/README.md#frontend-design). Offline work under D3 is independent of that gate.
+D6 authorized the remaining verification under the [evaluation contract](../../agents/tests/evaluation/README.md#frontend-design). The closeout has no open gates.
 
 ### Working assumptions
 
@@ -54,14 +62,14 @@ Product-specific changes and live cutover are outside this work. Product reposit
 
 ## Verified evidence
 
-- The baseline frontend entry at `f035778` provided visual direction, copy, responsive design, and optional screenshot critique. It had no specific process for identifying incumbent view ownership, task-order grouping, reusable control families or constrained-window acceptance. The exact baseline body is now the [pinned conditional reference](../agents/skills/frontend-design/references/vendor/anthropic/frontend-design.md).
-- The [technical web audit](../agents/skills/web-design-review/SKILL.md) reports pinned checklist findings for named or changed web files. Its former description also invited general UX review, broader than the implementation. Its discovery description now names the technical scope.
+- The baseline frontend entry at `f035778` provided visual direction, copy, responsive design, and optional screenshot critique. It had no specific process for identifying incumbent view ownership, task-order grouping, reusable control families or constrained-window acceptance. The exact baseline body is now the [pinned conditional reference](../../agents/skills/frontend-design/references/vendor/anthropic/frontend-design.md).
+- The [technical web audit](../../agents/skills/web-design-review/SKILL.md) reports pinned checklist findings for named or changed web files. Its former description also invited general UX review, broader than the implementation. Its discovery description now names the technical scope.
 - Native Windows Codex `0.172.0` and Ubuntu WSL Codex `0.171.0` discovered the baseline canonical design skills with zero errors in `skills/list`. The debug prompt exposed skill metadata. These checks establish discovery and prompt visibility for the tested checkout. Actual selection in failing sessions and the live Orchestra launch context remain unverified. [App-server skills protocol](https://learn.chatgpt.com/docs/app-server#skills).
 - At published Orchestra revision `6609361`, the shared stage map is empty and explicit bindings lead their role prompts. The picker inserts a file-read request. Workbench owns its shared tokens, controls and responsive layout in `style.css`. [Stage settings](https://raw.githubusercontent.com/6r0m/orchestra/6609361/.orchestra/settings.json), [prompt assembly](https://github.com/6r0m/orchestra/blob/6609361/app/agents/nodes.py#L237-L270), [picker](https://raw.githubusercontent.com/6r0m/orchestra/6609361/app/interfaces/workbench/static/skills.js), [Workbench owners](https://raw.githubusercontent.com/6r0m/orchestra/6609361/app/interfaces/workbench/static/README.md).
 
 ## Current architecture and source of truth
 
-[Universal instructions](../agents/AGENTS.md#policy-context) own conditional cross-cutting policies and authority. [Skills](../agents/README.md#skills) are selected by description or invoked explicitly. [Lifecycle](../agents/lifecycle/README.md#shared-resource-contracts) projects canonical skill paths, [Pi's package](../agents/package.json) exposes direct skill entries, and the [source manifest](../tools/source-manifest.json) owns artifact admission. The frontend skill owns UX/UI method. The evaluation owner specifies evidence for selection and quality.
+[Universal instructions](../../agents/AGENTS.md#policy-context) own conditional cross-cutting policies and authority. [Skills](../../agents/README.md#skills) are selected by description or invoked explicitly. [Lifecycle](../../agents/lifecycle/README.md#shared-resource-contracts) projects canonical skill paths, [Pi's package](../../agents/package.json) exposes direct skill entries, and the [source manifest](../../tools/source-manifest.json) owns artifact admission. The frontend skill owns UX/UI method. The evaluation owner specifies evidence for selection and quality.
 
 ## Problem and root cause
 
@@ -95,21 +103,22 @@ The existing frontend entry already owns UI design and has a portable invocation
 1. [x] Reuse the existing design entrypoint, retain pinned content and license, and update the source manifest and catalog.
 2. [x] Distinguish technical code-audit metadata and document the paired evaluation in the existing evaluation owner.
 3. [x] Record candidate offline and native route verification in the review record.
-4. [ ] Run the paired evaluation once authorized. Record which layer needs correction and revise only that layer.
+4. [x] Compare the current and temporary skills on rendered fixtures and apply D5. See the [skill improvement history](../../agents/skill-improvements.md#2026-11-25--composition-and-a-rendered-refinement-pass).
+5. [x] Verify ordinary task-driven selection, native explicit invocation, planning-skill composition and the backend-only negative control under the evaluation protocol.
 
 ## Test-first and verification plan
 
 ### Red evidence
 
-The baseline skill body establishes the missing workflow steps. The [evaluation protocol](../agents/tests/evaluation/README.md#frontend-design) requires fixtures to show seeded navigation, settings and dialog problems before scoring either arm. Keep actual baseline responses as observed. Use ordinary UI prompts, explicit invocation, planning-skill composition and a backend-only negative control.
+The baseline skill body establishes the missing workflow steps. The [evaluation protocol](../../agents/tests/evaluation/README.md#frontend-design) requires fixtures to show seeded navigation, settings and dialog problems before scoring either arm. Keep actual baseline responses as observed. Use ordinary UI prompts, explicit invocation, planning-skill composition and a backend-only negative control.
 
 ### Green evidence
 
-Check the candidate's skill structure, reference and license bytes, public file admission, and skill discovery through the normal Codex routes. Use `make check`, `make test` and `make public-check` for the offline contracts and compare the baseline and candidate with `python3 agents/tests/report_cost.py`. Use the same [evaluation protocol](../agents/tests/evaluation/README.md#frontend-design) to determine whether selection and rendered outcomes improve.
+Check the candidate's skill structure, reference and license bytes, public file admission, and skill discovery through the normal Codex routes. Use `make check`, `make test` and `make public-check` for the offline contracts and compare the baseline and candidate with `python3 agents/tests/report_cost.py`. Use the same [evaluation protocol](../../agents/tests/evaluation/README.md#frontend-design) to determine whether selection and rendered outcomes improve.
 
 ## Documentation plan
 
-The frontend skill owns the method, the agents README routes to it, the upstream lock owns provenance, and the [third-party notice](../THIRD_PARTY.md) identifies the bundled terms. The evaluation README owns the reusable quality and selection rubric.
+The frontend skill owns the method, the agents README routes to it, the upstream lock owns provenance, and the [third-party notice](../../THIRD_PARTY.md) identifies the bundled terms. The evaluation README owns the reusable quality and selection rubric.
 
 ## Completion criteria
 
@@ -133,3 +142,14 @@ The offline contract passes and the paired evaluation demonstrates applicable se
 - D4 recorded. The third-party notice now identifies the Anthropic visual-direction reference and links to its shipped license. The release regression failed against the former license path before the notice was corrected.
 - The frontend skill now consults the visual-direction reference when visual decisions materially affect the result, including refinement within the incumbent visual identity. Comparative model evidence remains pending.
 - The notice regression passed after correction. An independently extracted distribution passed its artifact check, all 11 conformance tests and all 30 release tests. The vendored guide and license still match `f035778` byte-for-byte.
+
+### 2026-11-25 — Rendered comparison and promotion
+
+- D5 recorded. The [skill improvement history](../../agents/skill-improvements.md#2026-11-25--composition-and-a-rendered-refinement-pass) records the evidence supporting promotion and its limits. The canonical entrypoint matched the tested candidate bytes at promotion. Native selection verification was still pending at that point.
+
+### 2026-11-25 — Native acceptance
+
+- D6 recorded. The initial ordinary UI requests read the frontend skill body. Native explicit invocation resolved the correct skill. The planning request also read the design body, produced exactly one planning todo and preserved the fixture source. The backend control passed its three tests without reading the design body.
+- The first Delivery output reused the shared button and fixed the compact layout, but omitted the existing last-delivery status. The Chrome preservation assertion failed at every tested size and theme. The skill now requires an inventory of meaningful information and actions before layout changes, with one presentation of repeated status.
+- Both ordinary native retests read the revised skill and completed. The same fixture check rejected the initial omission and accepted the retained status on the Delivery page. All 23 Repositories and 40 Delivery assertions passed in Chrome, including the peer pixel comparisons, compact actions, and failure/retry flow. See the [native acceptance history](../../agents/skill-improvements.md#2026-11-25--native-selection-and-preserving-status-during-layout-changes).
+- The independently extracted `make test` run recorded 303 passes, nine skips and the known WSL-extracted Windows command-shim shutdown failure. The exact case passed on native Windows with `python -B -m unittest discover -s agents/tests -p test_codex_settings.py -k test_windows_command_shim_with_spaces_empty_home_and_conflicting_policy`.

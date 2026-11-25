@@ -4,7 +4,7 @@ Portable coding-agent configuration and optional AI product utilities.
 
 | Owner | Responsibility |
 |---|---|
-| [agents/](agents/README.md) | Shared coding-agent environment |
+| [agents/](agents/README.md) | Shared coding-agent environment and skill improvement history |
 | [integrations/](integrations/README.md) | Product-specific utilities |
 | [tools/](tools/README.md) | Setup, checks and source export |
 | [docs/](docs/README.md) | Structure, diagrams and source verification |

@@ -66,6 +66,7 @@
     "agents/scripts/README.md",
     "agents/scripts/install.sh",
     "agents/scripts/uninstall.sh",
+    "agents/skill-improvements.md",
     "agents/skills/.shared/content-rules.md",
     "agents/skills/.shared/documentation-structure.md",
     "agents/skills/.shared/engineering-change-principles.md",
