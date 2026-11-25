@@ -46,6 +46,10 @@ An agent handling a material UI change should understand the user's task, produc
   - Effect — Authorizes the remaining acceptance work and fixes within the design workflow.
   - Reason — The layout and reuse goal should be solved.
   - Date/source — 2026-11-25, operator completion request.
+- **D7** Evaluate the follow-up review and apply valid corrections. Use completed verification where it still applies.
+  - Effect — Authorizes the focused review corrections and checks for the changed source.
+  - Reason — Existing checks had already passed for the tested behavior.
+  - Date/source — 2026-11-25, operator review-and-fix request.
 
 ### Operator gates
 
@@ -153,3 +157,7 @@ The offline contract passes and the paired evaluation demonstrates applicable se
 - The first Delivery output reused the shared button and fixed the compact layout, but omitted the existing last-delivery status. The Chrome preservation assertion failed at every tested size and theme. The skill now requires an inventory of meaningful information and actions before layout changes, with one presentation of repeated status.
 - Both ordinary native retests read the revised skill and completed. The same fixture check rejected the initial omission and accepted the retained status on the Delivery page. All 23 Repositories and 40 Delivery assertions passed in Chrome, including the peer pixel comparisons, compact actions, and failure/retry flow. See the [native acceptance history](../../agents/skill-improvements.md#2026-11-25--native-selection-and-preserving-status-during-layout-changes).
 - The independently extracted `make test` run recorded 303 passes, nine skips and the known WSL-extracted Windows command-shim shutdown failure. The exact case passed on native Windows with `python -B -m unittest discover -s agents/tests -p test_codex_settings.py -k test_windows_command_shim_with_spaces_empty_home_and_conflicting_policy`.
+
+### 2026-11-25 — Shared reuse and state coverage
+
+- D7 recorded. Comparison with `0afe2ff` confirmed weaker wording on shared reuse, themes and applicable states. The skill now makes those checks explicit. The [skill improvement history](../../agents/skill-improvements.md#2026-11-25--explicit-shared-reuse-and-state-coverage) records the correction and bounds the earlier live evaluation to its tested revision.

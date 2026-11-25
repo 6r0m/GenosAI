@@ -28,3 +28,7 @@ Fresh Windows Codex sessions selected the design skill on ordinary requests for 
 The first Delivery implementation improved the compact layout and reused the shared controls, but dropped the existing last-delivery value. The preservation step was made explicit in the skill. Fresh retests read the revision on ordinary requests and passed 63 Chrome assertions. Repositories reused the shared search and kept the Runs route intact. Delivery kept one last-delivery value in its owning view, reused the Notifications button treatment, and kept Save reachable at 700 × 440 in both themes with all 24 destinations and after a rejected save. Save retry, draft preservation and focus return passed. The peer screenshots matched their baselines pixel for pixel.
 
 These results close the recorded layout, reuse and selection criteria for the tested client and fixtures. The sample covers two operational surfaces and the prior expressive-page comparison.
+
+### 2026-11-25 — Explicit shared reuse and state coverage
+
+A follow-up review found that the revised instructions treated neighboring views as visual references while leaving implementation reuse implicit. The [frontend-design skill](skills/frontend-design/SKILL.md) explicitly directs agents to reuse shared components, tokens and interaction patterns and fix shared behavior at its owner within scope. It also calls for inspecting relevant themes and applicable interface states. The 63 Chrome assertions and native selection results above describe the revision before this wording change.
