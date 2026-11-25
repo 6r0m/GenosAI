@@ -1,6 +1,6 @@
 ---
 name: web-design-review
-description: Check changed web UI code (HTML, CSS, templates, front-end scripts) against a pinned copy of Vercel's Web Interface Guidelines — accessibility, focus, forms, motion, layout, copy. Use after changing a web interface, or when asked to review UI, UX or accessibility.
+description: Audit web UI code against Vercel's pinned Web Interface Guidelines. Use after web interface changes or for technical checks of accessibility, keyboard focus, forms, motion, layout implementation or copy. Report findings by file.
 argument-hint: "[files or glob]"
 ---
 

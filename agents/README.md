@@ -74,16 +74,14 @@ Pi consumes the shared instructions and local package manifest; its provider own
 | [implement-approved-change](skills/implement-approved-change/SKILL.md) | building and proving an approved todo |
 | [architect](skills/architect/SKILL.md) | judging shape, read-only |
 | [drive-browser](skills/drive-browser/SKILL.md) | browser mechanics on this machine; no repository analysis |
-| [frontend-design](skills/frontend-design/SKILL.md) | visual direction for building or reshaping a UI; upstream, pinned in its `UPSTREAM.lock` |
+| [frontend-design](skills/frontend-design/SKILL.md) | UX/UI design, interaction, cross-screen consistency and rendered critique |
 | [web-design-review](skills/web-design-review/SKILL.md) | checking changed web-UI code against pinned interface guidelines |
 | [cinematic-capture-director](skills/cinematic-capture-director/SKILL.md) | directing and capturing footage of a real 3D world |
 
-Every skill is model-invocable: an agent that recognises the work loads the right
-skill by itself, which is the whole point of a skill. What stops an agent drifting
-from investigation into implementation is the contract inside
-`implement-approved-change` — it requires an explicitly approved todo and says so
-in its own first line — not a frontmatter switch that would also keep the skill
-from ever being reached.
+Skills are available for explicit invocation and for model selection based on their
+descriptions. The contract inside
+`implement-approved-change` keeps investigation distinct from implementation by
+requiring an explicitly approved todo.
 
 `argument-hint` is a Claude Code extension; the portable Agent Skills spec allows
 only `name`, `description`, `license`, `compatibility`, `metadata` and

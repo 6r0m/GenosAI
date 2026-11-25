@@ -9,6 +9,13 @@ and the reply is scored against the stated criterion. The prompts end with a fix
 so two runs are comparable. S5 writes documentation, so it runs through its own script — see S5
 below.
 
+## Contents
+
+- [Metrics and general scenarios](#metrics)
+- [Frozen subjects](#the-subject-must-not-move) and [running a scenario](#running-one)
+- [S5 relationship ownership](#s5) and [its input contract](#portable-input-contract)
+- [Frontend design](#frontend-design)
+
 ## Metrics
 
 | metric | why it is the one to watch |
@@ -69,7 +76,7 @@ the subject and the prompt tells you nothing.
 
 ## S5
 
-The one scenario that writes. A cold headless agent documents a small mock of two repositories —
+A cold headless agent documents a small mock of two repositories —
 `shop/services/` with `checkout` and `payments`, and a separate `ledger` — whose code holds one
 relationship of each kind: within one tree, across repositories, and to an external. The
 [S5 script, which builds the mock and both instruction arms and runs one sample per call](s5-relationship-ownership.sh):
@@ -105,3 +112,37 @@ bash s5-relationship-ownership.sh setup <fresh-output> <subject-agents> <control
 Actual model evaluations remain separate, paid operations. Set `S5_MODEL` explicitly and obtain
 authorization before `run`; ordinary tests never invoke it. Historical receipts are private evidence,
 not an acceptance baseline shipped with this source.
+
+## Frontend design
+
+Compare the baseline and candidate design-skill catalogs and the
+[frontend-design method](../../skills/frontend-design/SKILL.md).
+Run only with authorization for the selected model. Use fresh sessions and disposable copies of
+the same sanitized UI fixture at a fixed revision. Keep the client, model, effort, tool access,
+permissions and prompts identical within each paired comparison. Install only the intended arm
+under the runner's normal skill discovery mechanism. Keep the other arm and scoring rubric outside
+the worker's accessible inputs. The S5 runner bypasses native skill loading.
+
+| Case | Seeded defect | Score from the rendered interface |
+|---|---|---|
+| Navigation | Run-specific controls appear in a repository view | The controls belong to the run view, and reaching either task still works |
+| Settings | Schema-order fields, repeated status and mismatched controls for equivalent actions | Fields follow decision order, status has one clear home, and peers share component and visual conventions |
+| Compact dialog | Long content clips an action or creates competing vertical scroll areas | The action remains reachable, scroll ownership is clear, and keyboard focus and dismissal work at supported sizes |
+
+Before comparing responses, check that the fixture exhibits the seeded defects and that the rubric
+would reject them. Inspect the baseline and candidate renderings at the same supported dimensions,
+themes and states. Score objective behavior with runtime observations and rate hierarchy and
+cross-screen consistency against a named neighboring view. Count a regression when the candidate
+breaks an existing task or interaction. Score without seeing the arm labels where practical.
+
+Use plain UI requests for implicit selection, a provider-native explicit invocation for a separate
+pair, and a material UI investigation that explicitly starts with the planning skill to test
+composition and check that it stays within planning authority. Include a backend-only request that should leave the
+frontend skill body unloaded. Trace skill visibility, actual body and reference reads, application
+of the method, and rendered outcomes. A discovered name or a generated screenshot alone is
+insufficient evidence for activation or visual inspection, respectively.
+
+Apply the [shared metrics](#metrics) and save redacted receipts privately. Report which layer
+failed. An enabled skill may still be omitted or shortened in the prompt catalog, so inspect
+the worker's visible metadata before attributing missed selection to the description. Equal arms
+leave an improvement in design quality unverified.
